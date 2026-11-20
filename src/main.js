@@ -11,6 +11,7 @@ import { importFile } from './importers.js';
 import { SHEET, SHEET_DEFAULTS, sheetFlat } from './sheet.js';
 import { HOLES, SHAFTS, COMMON_FITS, fit, deviation, bend, THREADS } from './calc.js';
 import { icon, TYPE_ICON, FAMILY_ICON } from './icons.js';
+import { Assistant } from './assistant.js';
 
 // ------------------------------------------------------------------ utilitaires DOM
 const $ = (s, r = document) => r.querySelector(s);
@@ -94,6 +95,7 @@ class App {
     this.gizmoMode = 'translate';
     this.libOpen = new Set();
     try { if (localStorage.getItem('formacad.theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch { /* stockage indisponible */ }
+    this.ai = new Assistant(this);
     this.setupUI();
     this.bindEvents();
     this.commit(false);
@@ -150,6 +152,7 @@ class App {
       ['redo', 'Rétablir (Ctrl+Y)', () => this.redo()],
     ];
     for (const [ic, t, fn] of quick) $('#quick').append(E('button', { title: t, html: icon(ic, 18), onclick: fn }));
+    $('#topbar').insertBefore(E('button', { id: 'ai-btn', title: 'Assistant IA : décrivez ce que vous voulez, il le construit', onclick: () => this.ai.toggle(), html: '✨ Assistant IA' }), $('#docname'));
     const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['modify', 'Modifier'], ['tools', 'Outils'], ['export', 'Plan & Export'], ['help', 'Aide']];
     for (const [id, label] of tabs) $('#tabs').append(E('button', { 'data-tab': id, onclick: () => { this.tab = id; this.renderRibbon(); } }, label));
 
@@ -316,7 +319,8 @@ class App {
       case 'help': return [
         { g: 'Démarrer', b: [
           { label: 'Exemple', ic: 'play', fn: () => this.loadExample(), title: 'Charger un assemblage d\'exemple' },
-          { label: 'Pas à pas', ic: 'play', fn: () => this.tutorialsDialog(), primary: true, title: 'Guides : première pièce, tôle pliée, carré-rond, assemblage, plan' },
+          { label: 'Assistant IA', ic: 'sun', fn: () => this.ai.toggle(), primary: true, title: 'Décrivez votre pièce en français, l\'IA la construit' },
+          { label: 'Pas à pas', ic: 'play', fn: () => this.tutorialsDialog(), title: 'Guides : première pièce, tôle pliée, carré-rond, assemblage, plan' },
           { label: 'Rechercher une commande', ic: 'search', fn: () => this.openPalette(), title: 'Ctrl+K' },
           { label: 'Raccourcis', ic: 'help', fn: () => this.helpDialog() },
         ] },
@@ -1869,6 +1873,7 @@ class App {
       if (this.isolate) it('Tout réafficher', 'eye', () => this.toggleIsolate());
       it(this.explode > 0 ? 'Rassembler (fin de vue éclatée)' : 'Vue éclatée', 'explode', () => this.toggleExplode());
       it('Rechercher une commande…  Ctrl+K', 'search', () => this.openPalette());
+      it('Demander à l\'assistant IA', 'sun', () => this.ai.toggle());
     }
     const m = E('div', { class: 'ctxmenu' });
     for (const x of items) {
