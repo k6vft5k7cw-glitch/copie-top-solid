@@ -366,13 +366,32 @@ export function drawingPrims(layout, opts = {}) {
       text([x + 1.2, (cy + dy) / 2], th * 0.9, fmtDim(b.maxY - b.minY), 'COTES');
     }
   }
+  // symboles de soudure (ISO 2553) sur la première vue orthogonale
+  if (opts.welds && opts.welds.length) {
+    const v = layout.views.find((x) => x.name !== 'Isométrique');
+    if (v) {
+      const Vw = VIEWS[v.name];
+      opts.welds.forEach((w, i) => {
+        const [px, py] = P(v, w.mid.dot(Vw.u), w.mid.dot(Vw.v));
+        const k = 1 + (i % 4) * 0.45;
+        const ex = px + 10 * k, ey = py + 10 * k;
+        line([px, py], [ex, ey], 'SOUDURE');
+        line([px, py], [px + 2.2, py + 0.9], 'SOUDURE'); line([px, py], [px + 0.9, py + 2.2], 'SOUDURE');
+        line([ex, ey], [ex + 26, ey], 'SOUDURE');
+        // triangle du cordon d'angle sous la ligne de référence (côté flèche)
+        line([ex + 9, ey], [ex + 9, ey - 3.5], 'SOUDURE'); line([ex + 9, ey - 3.5], [ex + 12.5, ey], 'SOUDURE');
+        text([ex + 1, ey - 3.2], 2.5, `a${w.a}`, 'SOUDURE');
+        text([ex + 14, ey - 3.2], 2.5, `${Math.round(w.L)}`, 'SOUDURE');
+      });
+    }
+  }
   return { prims, W: PW, H: PH, scale: s, paper: PAPERS[paper] ? paper : null };
 }
 
 export function drawingToDxf(layout, opts = {}) {
   const { prims } = drawingPrims(layout, opts);
   const dxf = new DxfWriter();
-  const col = { VISIBLE: 7, CACHE: 8, COTES: 1, TEXTE: 3, CADRE: 5 };
+  const col = { VISIBLE: 7, CACHE: 8, COTES: 1, TEXTE: 3, CADRE: 5, SOUDURE: 6 };
   for (const p of prims) {
     const ly = dxf.layer(p.layer, col[p.layer] || 7);
     if (p.t === 'line') dxf.line(p.a, p.b, ly);
@@ -393,12 +412,13 @@ export function drawingToSvg(layout, opts = {}) {
     CACHE: `stroke="#777" stroke-width="${base * 1.3}" stroke-dasharray="${base * 10} ${base * 6}"`,
     COTES: `stroke="#c62828" stroke-width="${base * 1.1}"`,
     CADRE: `stroke="#222" stroke-width="${base * 2.2}"`,
+    SOUDURE: `stroke="#6a1b9a" stroke-width="${base * 1.3}"`,
   };
   const groups = {};
   const texts = [];
   for (const p of prims) {
     if (p.t === 'line') (groups[p.layer] = groups[p.layer] || []).push(`M${p.a[0].toFixed(3)} ${(H - p.a[1]).toFixed(3)}L${p.b[0].toFixed(3)} ${(H - p.b[1]).toFixed(3)}`);
-    else texts.push(`<text x="${p.p[0].toFixed(2)}" y="${(H - p.p[1]).toFixed(2)}" font-size="${p.h}" text-anchor="${p.anchor}" font-family="Arial" fill="${p.layer === 'COTES' ? '#c62828' : p.layer === 'TEXTE' && p.h < 3 ? '#555' : '#111'}">${esc(p.txt)}</text>`);
+    else texts.push(`<text x="${p.p[0].toFixed(2)}" y="${(H - p.p[1]).toFixed(2)}" font-size="${p.h}" text-anchor="${p.anchor}" font-family="Arial" fill="${p.layer === 'SOUDURE' ? '#6a1b9a' : p.layer === 'COTES' ? '#c62828' : p.layer === 'TEXTE' && p.h < 3 ? '#555' : '#111'}">${esc(p.txt)}</text>`);
   }
   const paths = Object.entries(groups).map(([k, d]) => `<path d="${d.join('')}" fill="none" ${sty[k] || sty.VISIBLE}/>`).join('');
   const size = opts.forScreen ? 'width="100%" height="100%"' : `width="${W}mm" height="${H}mm"`;

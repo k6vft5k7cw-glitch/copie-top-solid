@@ -195,6 +195,16 @@ class App {
       return [
         { g: 'Dessin', b: [tool('select', 'Sélection', 'select', 'Échap'), tool('line', 'Ligne', 'line', 'L'), tool('rect', 'Rectangle', 'rect', 'R'), tool('crect', 'Rectangle centré', 'crect', 'Maj+R'),
           tool('circle', 'Cercle', 'circle', 'C'), tool('arc', 'Arc', 'arc', 'A'), tool('polygon', 'Polygone', 'polygon', 'P'), tool('slot', 'Oblong', 'slot', 'O')] },
+        { g: 'Coins', b: [tool('fillet', 'Congé', 'filletc', 'G'), tool('chamfer', 'Chanfrein', 'chamferc', 'J')] },
+        { g: 'Contraintes (sur la sélection)', b: [
+          { label: 'Horizontal', ic: 'horiz', fn: () => this.editor.constrain('H') },
+          { label: 'Vertical', ic: 'vert', fn: () => this.editor.constrain('V') },
+          { label: 'Parallèle', ic: 'para', fn: () => this.editor.constrain('parallel') },
+          { label: 'Perpendic.', ic: 'perp', fn: () => this.editor.constrain('perp'), title: 'Perpendiculaire' },
+          { label: 'Égal', ic: 'equal', fn: () => this.editor.constrain('equal'), title: 'Longueurs ou rayons égaux' },
+          { label: 'Concentrique', ic: 'circle', fn: () => this.editor.constrain('concentric') },
+          { label: this.showSkDims === false ? 'Afficher cotes' : 'Masquer cotes', ic: 'measure', fn: () => { this.showSkDims = this.showSkDims === false; this.renderSketchDims(); this.renderRibbon(); } },
+        ] },
         { g: 'Édition', b: [
           { label: 'Construction', ic: 'construction', fn: () => this.toggleConstruction(), title: 'Basculer en trait de construction (ignoré pour les volumes)' },
           { label: 'Supprimer', ic: 'trash', fn: () => this.editor.deleteSelected() || this.toast('Sélectionnez des éléments avec l\'outil Sélection'), title: 'Supprimer la sélection (Suppr)' },
@@ -332,8 +342,14 @@ class App {
   // ================================================================ événements
   bindEvents() {
     const cv = this.viewer.renderer.domElement;
-    cv.addEventListener('pointerdown', (e) => { this.down = { x: e.clientX, y: e.clientY, b: e.button, axis: this.viewer.tc.axis }; });
+    cv.addEventListener('pointerdown', (e) => {
+      this.down = { x: e.clientX, y: e.clientY, b: e.button, axis: this.viewer.tc.axis };
+      if (this.mode === 'sketch' && e.button === 0 && this.editor.onDown(e)) this.skDragging = true;
+    });
+    cv.addEventListener('pointerdown', (e) => this.handleDown(e), { capture: true });
     cv.addEventListener('pointerup', (e) => {
+      if (this.skDragging) { this.skDragging = false; if (this.editor?.onUp()) { this.down = null; return; } }
+      if (this.handleDrag) { this.handleUp(); this.down = null; return; }
       const d = this.down;
       this.down = null;
       if (!d) return;
@@ -428,7 +444,7 @@ class App {
     }
     if (e.key === 'Delete' || e.key === 'Backspace') { ed.deleteSelected(); return; }
     const k = e.key.toLowerCase();
-    const map = { l: 'line', r: e.shiftKey ? 'crect' : 'rect', c: 'circle', a: 'arc', p: 'polygon', o: 'slot' };
+    const map = { l: 'line', r: e.shiftKey ? 'crect' : 'rect', c: 'circle', a: 'arc', p: 'polygon', o: 'slot', g: 'fillet', j: 'chamfer', s: 'select' };
     if (map[k]) ed.setTool(map[k]);
     if (k === 'f') this.fitView();
   }
@@ -461,6 +477,8 @@ class App {
 
   onMove(e) {
     this.lastMouse = { clientX: e.clientX, clientY: e.clientY };
+    if (this.skDragging) return this.editor.onDrag(e);
+    if (this.handleDrag) return this.handleMove(e);
     if (this.mode === 'sketch') return this.editor.onMove(e);
     if (this.mode === 'place') return this.placeMove(e);
     if (this.mode === 'measure' || this.mode === 'weld') return this.measureMove(e);
@@ -472,6 +490,8 @@ class App {
 
   onFrame() {
     this.positionHud();
+    this.positionSketchDims();
+    this.positionHandles();
     if (this.meas && this.meas.pts.length === 2) {
       const [a, b] = this.meas.pts;
       const s = this.viewer.toScreen(a.clone().add(b).multiplyScalar(0.5));
@@ -538,6 +558,8 @@ class App {
     this.viewer.fitShadows(this.sceneBox(), this.settings.shadows !== false && !this.settings.wire);
     this.attachGizmo();
     this.renderHud();
+    if (!this.handleDrag) this.renderHandles();
+    else for (const m of this.handles || []) { const hd = m.userData.handle; const M = this.model.worldMatrix(hd.obj); const defs = this.handleDefs(hd.obj); const nd = defs.find((x) => x.axis.equals(hd.axis)); if (nd) m.position.copy(nd.pt.applyMatrix4(M)); }
   }
 
   buildGroup(o) {
@@ -743,7 +765,10 @@ class App {
     // ---- paramètres
     const ps = sec('Dimensions');
     if (BASIC[o.type]) {
-      for (const d of BASIC[o.type].params) ps.append(this.numField(d.label, o.params[d.k], (v) => set(() => { o.params[d.k] = Math.max(d.min ?? -Infinity, v); }), d.unit, 'p.' + d.k));
+      for (const d of BASIC[o.type].params) {
+        if (d.options) ps.append(this.selField(d.label, o.params[d.k] ?? d.def, d.options, (v) => set(() => { o.params[d.k] = v; }), 'p.' + d.k));
+        else ps.append(this.numField(d.label, o.params[d.k] ?? d.def, (v) => set(() => { o.params[d.k] = Math.max(d.min ?? -Infinity, v); }), d.unit, 'p.' + d.k));
+      }
     } else if (o.type === 'part') {
       const fam = familyById(o.params.family);
       ps.append(E('div', { class: 'note', style: 'margin-bottom:8px' }, fam.name));
@@ -772,6 +797,8 @@ class App {
     } else if (o.type === 'extrude') {
       ps.append(this.numField('Hauteur', o.params.h, (v) => set(() => { o.params.h = Math.max(0.01, v); }), 'mm', 'p.h'));
       ps.append(this.selField('Sens', o.params.dir, ['Normale', 'Inverse', 'Symétrique'], (v) => set(() => { o.params.dir = v; }), 'p.dir'));
+      ps.append(this.selField('Arêtes haut / bas', o.params.edge || 'Aucun', ['Aucun', 'Congé', 'Chanfrein'], (v) => set(() => { o.params.edge = v; if (!o.params.er) o.params.er = 1; }), 'p.edge'));
+      if (o.params.edge && o.params.edge !== 'Aucun') ps.append(this.numField(o.params.edge === 'Congé' ? 'Rayon du congé' : 'Taille du chanfrein', o.params.er || 1, (v) => set(() => { o.params.er = Math.max(0.1, v); }), 'mm', 'p.er'));
       ps.append(this.sketchLink(o));
     } else if (o.type === 'revolve') {
       ps.append(this.numField('Angle', o.params.angle, (v) => set(() => { o.params.angle = Math.min(360, Math.max(1, v)); }), '°', 'p.angle'));
@@ -911,15 +938,23 @@ class App {
         const [k, i] = path.split('.');
         const val = i != null ? e[k][+i] : e[k];
         s.append(this.numField(label, val, (v) => {
-          if (i != null) e[k] = e[k].slice(), e[k][+i] = v; else e[k] = k === 'n' ? Math.max(3, Math.round(v)) : v;
+          if (i != null) { const old = e[k].slice(); const nw = e[k].slice(); nw[+i] = v; if (e.type === 'line' || e.type === 'slot') ed.movePoint(old, nw); e[k] = nw; } else e[k] = k === 'n' ? Math.max(3, Math.round(v)) : v;
           this.sketchChanged();
         }, /a0|a1|rot/.test(k) ? '°' : k === 'n' ? '' : 'mm', 'e.' + path));
       }
       if (e.type === 'circle') s.append(this.numField('Diamètre', e.r * 2, (v) => { e.r = v / 2; this.sketchChanged(); }, 'mm', 'e.diam'));
-      if (e.type === 'line') s.append(E('div', { class: 'info' }, E('span', {}, 'Longueur'), E('b', {}, fmt(Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1])) + ' mm')));
+      if (e.type === 'line') {
+        s.append(this.numField('Longueur', Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]), (v) => { this.setLineLength(e, v); }, 'mm', 'e.len'));
+        s.append(this.numField('Angle', (Math.atan2(e.b[1] - e.a[1], e.b[0] - e.a[0]) * 180) / Math.PI, (v) => { const L = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]); const nb = [e.a[0] + L * Math.cos(v * DEG), e.a[1] + L * Math.sin(v * DEG)]; ed.movePoint(e.b, nb); e.b = nb; this.sketchChanged(); }, '°', 'e.ang'));
+      }
       p.append(s);
     } else if (sel.length > 1) {
-      p.append(E('div', { class: 'sec' }, E('h4', {}, 'Sélection'), E('div', { class: 'note' }, `${sel.length} éléments sélectionnés.`)));
+      p.append(E('div', { class: 'sec' }, E('h4', {}, 'Sélection'), E('div', { class: 'note' }, `${sel.length} éléments sélectionnés (le premier sert de référence).`)));
+    }
+    if (sel.length) {
+      const c = (lab, k) => E('button', { class: 'btn', onclick: () => ed.constrain(k) }, lab);
+      p.append(E('div', { class: 'sec' }, E('h4', {}, 'Contraintes'), E('div', { class: 'btnrow' }, c('Horizontal', 'H'), c('Vertical', 'V'), c('Parallèle', 'parallel'), c('Perpendiculaire', 'perp'), c('Égal', 'equal'), c('Concentrique', 'concentric')),
+        E('div', { class: 'note' }, 'Astuce : glissez les points à la souris (outil Sélection) ; les lignes connectées suivent. Cliquez une cote affichée pour la modifier.')));
     }
     p.append(E('div', { class: 'sec' }, E('h4', {}, 'Saisie au clavier'), E('div', { class: 'note', html: `Pendant un tracé, tapez directement une valeur puis <span class="kbd">Entrée</span> :<br>
       • ligne : <span class="kbd">50</span> (longueur), <span class="kbd">50&lt;30</span> (longueur&lt;angle), <span class="kbd">20;10</span> (dx;dy)<br>
@@ -1372,6 +1407,7 @@ class App {
     banner.classList.remove('hidden');
     this.editor.setTool(o.params.entities.length ? 'select' : 'line');
     this.refresh();
+    this.renderSketchDims();
     this.refreshHint();
   }
 
@@ -1384,6 +1420,7 @@ class App {
     this.viewer.setOrtho(this.prevOrtho);
     $('#sketchbanner').classList.add('hidden');
     $('#cursorLabel').classList.add('hidden');
+    $('#skdims')?.remove();
     const empty = !o.params.entities.length;
     if (empty && this.model.get(o.id) && !this.model.objects.some((x) => x.params?.sketch === o.id)) {
       this.model.remove(o.id);
@@ -1403,6 +1440,7 @@ class App {
   sketchChanged(commit = true) {
     if (commit) this.commit();
     this.rebuildScene();
+    this.renderSketchDims();
     this.renderProps();
     this.renderTree();
     this.refreshHint();
@@ -1633,6 +1671,165 @@ class App {
     this.refresh();
   }
 
+  // ================================================================ cotes cliquables en esquisse
+  setLineLength(e, L) {
+    const d = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) || 1;
+    const nb = [e.a[0] + ((e.b[0] - e.a[0]) / d) * L, e.a[1] + ((e.b[1] - e.a[1]) / d) * L];
+    this.editor.movePoint(e.b, nb);
+    e.b = nb;
+    this.sketchChanged();
+  }
+
+  renderSketchDims() {
+    $('#skdims')?.remove();
+    this.skDimItems = [];
+    if (this.mode !== 'sketch' || this.showSkDims === false) return;
+    const box = E('div', { id: 'skdims' });
+    const ed = this.editor, ents = ed.entities;
+    const add = (pt, txt, onset, cur) => {
+      const b = E('button', { class: 'skdim', title: 'Cliquez pour modifier' }, txt);
+      b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const inp = E('input', { type: 'text', value: fmtIn(cur), class: 'skdim-in' });
+        b.replaceWith(inp);
+        inp.focus(); inp.select();
+        let finished = false;
+        const done = (ok) => { if (finished) return; finished = true; const v = evalNum(inp.value); setTimeout(() => { if (ok && v != null && v > 0) onset(v); else this.renderSketchDims(); }, 0); };
+        inp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') done(true); if (k.key === 'Escape') done(false); });
+        inp.addEventListener('blur', () => done(true));
+        this.skDimItems.find((x) => x.el === b).el = inp;
+      });
+      box.append(b);
+      this.skDimItems.push({ el: b, pt });
+    };
+    for (const e of ents.slice(0, 80)) {
+      if (e.construction) continue;
+      if (e.type === 'line') { const L = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]); add([(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2], fmt(L, 2), (v) => this.setLineLength(e, v), L); }
+      if (e.type === 'circle') add([e.c[0] + e.r * 0.71, e.c[1] + e.r * 0.71], 'Ø' + fmt(2 * e.r, 2), (v) => { e.r = v / 2; this.sketchChanged(); }, 2 * e.r);
+      if (e.type === 'arc') { let a1 = e.a1; while (a1 <= e.a0) a1 += 360; const m = ((e.a0 + a1) / 2) * DEG; add([e.c[0] + e.r * Math.cos(m), e.c[1] + e.r * Math.sin(m)], 'R' + fmt(e.r, 2), (v) => { e.r = v; this.sketchChanged(); }, e.r); }
+      if (e.type === 'rect') {
+        const x0 = Math.min(e.x, e.x + e.w), y0 = Math.min(e.y, e.y + e.h), w = Math.abs(e.w), h = Math.abs(e.h);
+        add([x0 + w / 2, y0], fmt(w, 2), (v) => { e.x = x0; e.w = v; e.y = y0; e.h = h; this.sketchChanged(); }, w);
+        add([x0 + w, y0 + h / 2], fmt(h, 2), (v) => { e.x = x0; e.w = w; e.y = y0; e.h = v; this.sketchChanged(); }, h);
+      }
+      if (e.type === 'polygon') add([e.c[0], e.c[1] - e.r], 'Ø' + fmt(2 * e.r, 2), (v) => { e.r = v / 2; this.sketchChanged(); }, 2 * e.r);
+      if (e.type === 'slot') { const L = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]); add([(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2], '↔' + fmt(L, 2), (v) => { const d = L || 1; e.b = [e.a[0] + ((e.b[0] - e.a[0]) / d) * v, e.a[1] + ((e.b[1] - e.a[1]) / d) * v]; this.sketchChanged(); }, L); }
+    }
+    $('#viewport').append(box);
+    this.positionSketchDims();
+  }
+
+  positionSketchDims() {
+    if (!this.skDimItems?.length || this.mode !== 'sketch') return;
+    const r = this.viewer.container.getBoundingClientRect();
+    for (const it of this.skDimItems) {
+      const sc = this.viewer.toScreen(this.editor.toWorld(it.pt));
+      it.el.style.left = sc.x - r.left + 'px';
+      it.el.style.top = sc.y - r.top + 'px';
+    }
+  }
+
+  // ================================================================ poignées d'étirement 3D
+  handleDefs(o) {
+    const p = o.params, H = [];
+    const h = (pt, axis, get, set) => H.push({ pt: new THREE.Vector3(...pt), axis: new THREE.Vector3(...axis), get, set });
+    if (['box', 'plate', 'wedge'].includes(o.type)) {
+      h([p.l / 2, 0, p.h / 2], [1, 0, 0], (t) => 2 * t, (v) => { p.l = v; });
+      h([0, p.w / 2, p.h / 2], [0, 1, 0], (t) => 2 * t, (v) => { p.w = v; });
+      h([0, 0, p.h], [0, 0, 1], (t) => t, (v) => { p.h = v; });
+    } else if (['cylinder', 'tube'].includes(o.type)) {
+      const k = o.type === 'tube' ? 'de' : 'd';
+      h([p[k] / 2, 0, p.h / 2], [1, 0, 0], (t) => 2 * t, (v) => { p[k] = v; if (o.type === 'tube' && p.di >= v) p.di = v * 0.8; });
+      h([0, 0, p.h], [0, 0, 1], (t) => t, (v) => { p.h = v; });
+    } else if (o.type === 'cone') {
+      h([p.d1 / 2, 0, 0], [1, 0, 0], (t) => 2 * t, (v) => { p.d1 = v; });
+      h([0, 0, p.h], [0, 0, 1], (t) => t, (v) => { p.h = v; });
+    } else if (o.type === 'sphere') {
+      h([0, 0, p.d], [0, 0, 1], (t) => t, (v) => { p.d = v; });
+    } else if (o.type === 'extrude') {
+      const sg = p.dir === 'Inverse' ? -1 : 1, f = p.dir === 'Symétrique' ? 0.5 : 1;
+      let c = [0, 0];
+      try { const f2 = this.model.cached('B' + this.model.baseKey(o), () => this.model.baseGeometry(o)); f2.computeBoundingBox(); const b = f2.boundingBox; c = [(b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2]; } catch { /* rien */ }
+      h([c[0], c[1], sg * p.h * f], [0, 0, sg], (t) => t / f, (v) => { p.h = v; });
+    } else if (o.type === 'sheet' && o.params.kind === 'shell') {
+      h([0, 0, p.H], [0, 0, 1], (t) => t, (v) => { p.H = v; });
+    } else if (o.type === 'sheet' && o.params.kind === 'bent') {
+      h([0, p.W / 2, 0], [0, 1, 0], (t) => 2 * t, (v) => { p.W = v; });
+    } else if (o.type === 'part' && p.L != null) {
+      const fam = familyById(p.family);
+      if (!fam) return H;
+      if (fam.cat === 'Visserie' && fam.id !== 'din975') h([0, 0, -p.L], [0, 0, -1], (t) => t, (v) => { p.L = v; o.name = ''; });
+      else {
+        const ax = p.axis === 'X' ? [1, 0, 0] : p.axis === 'Y' ? [0, 1, 0] : [0, 0, 1];
+        h(ax.map((x) => x * p.L), ax, (t) => t, (v) => { p.L = v; o.name = ''; });
+      }
+    }
+    return H;
+  }
+
+  renderHandles() {
+    if (!this.handleGroup) { this.handleGroup = new THREE.Group(); this.viewer.overlay.add(this.handleGroup); }
+    const G = this.handleGroup;
+    while (G.children.length) G.remove(G.children[0]);
+    this.handles = [];
+    const o = this.selObjs()[0];
+    if (this.mode !== 'normal' || this.selection.length !== 1 || !o || !o.visible || this.explode > 0 || o.role) return;
+    const defs = this.handleDefs(o);
+    const M = this.model.worldMatrix(o);
+    const rot = new THREE.Matrix4().extractRotation(M);
+    for (const d of defs) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff6d00, depthTest: false }));
+      m.renderOrder = 20;
+      m.userData.handle = { ...d, world: d.pt.clone().applyMatrix4(M), dirW: d.axis.clone().applyMatrix4(rot).normalize(), originW: new THREE.Vector3().setFromMatrixPosition(M), obj: o };
+      m.position.copy(m.userData.handle.world);
+      G.add(m);
+      this.handles.push(m);
+    }
+    this.positionHandles();
+  }
+
+  positionHandles() {
+    if (!this.handles?.length) return;
+    for (const m of this.handles) m.scale.setScalar(this.viewer.worldPerPixel(m.position) * 6);
+  }
+
+  handleDown(e) {
+    if (e.button !== 0 || this.mode !== 'normal' || !this.handles?.length) return;
+    const hits = this.viewer.pick(e, this.handles);
+    if (!hits.length) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    this.handleDrag = hits[0].object.userData.handle;
+    this.viewer.controls.enabled = false;
+    this.handleDrag.before = JSON.stringify(this.handleDrag.obj.params);
+  }
+
+  handleMove(e) {
+    const H = this.handleDrag;
+    const ray = this.viewer.rayFromEvent(e);
+    // point de l'axe le plus proche du rayon souris
+    const w0 = H.originW.clone().sub(ray.origin), d = H.dirW, r = ray.direction;
+    const a = d.dot(d), b = d.dot(r), c = r.dot(r), dd = d.dot(w0), ee = r.dot(w0);
+    const den = a * c - b * b;
+    if (Math.abs(den) < 1e-9) return;
+    const t = (b * ee - c * dd) / den;
+    let v = H.get(t);
+    const g = this.settings.snapGrid && !e.shiftKey ? this.settings.grid : 0.1;
+    v = Math.max(g, Math.round(v / g) * g);
+    H.set(v);
+    this.setCursorLabel(`${fmt(v, 2)} mm`);
+    if (!this._hraf) this._hraf = requestAnimationFrame(() => { this._hraf = null; this.rebuildScene(); });
+  }
+
+  handleUp() {
+    this.viewer.controls.enabled = true;
+    const H = this.handleDrag;
+    this.handleDrag = null;
+    $('#cursorLabel').classList.add('hidden');
+    if (H && JSON.stringify(H.obj.params) !== H.before) { this.commit(); this.refresh(); }
+  }
+
   // ================================================================ menu contextuel (clic droit)
   contextMenu(e) {
     this.closeMenu();
@@ -1751,7 +1948,7 @@ class App {
   // ================================================================ cotes modifiables dans la vue 3D
   hudParams(o) {
     const num = (k, label, unit = 'mm') => ({ k, label, unit });
-    if (BASIC[o.type]) return BASIC[o.type].params.slice(0, 4).map((d) => num(d.k, d.label.replace(/\s*\(.*\)/, ''), d.unit));
+    if (BASIC[o.type]) return BASIC[o.type].params.filter((d) => !d.options).slice(0, 4).map((d) => num(d.k, d.label.replace(/\s*\(.*\)/, ''), d.unit));
     if (o.type === 'part') {
       const fam = familyById(o.params.family);
       if (!fam) return [];
@@ -2297,10 +2494,11 @@ class App {
     const mainMat = Object.entries(mats).sort((x, y) => y[1] - x[1])[0]?.[0] || '';
     const totalMass = bomAll.reduce((a, r) => a + r.total, 0);
     const opts = {
-      hidden: true, dims: true, title: this.docName, paper: saved.paper || 'A3', withBom: bomAll.length > 1,
+      hidden: true, dims: true, title: this.docName, paper: saved.paper || 'A3', withBom: bomAll.length > 1, withWelds: true,
       fields: { societe: saved.societe || '', auteur: saved.auteur || '', indice: saved.indice || 'A', matiere: Object.keys(mats).length > 1 ? 'Voir nomenclature' : mainMat, date: new Date().toLocaleDateString('fr-FR'), masse: `Masse : ${totalMass >= 1000 ? fmt(totalMass / 1000, 2) + ' kg' : fmt(totalMass, 0) + ' g'}` },
     };
-    const full = () => ({ ...opts, bom: opts.withBom ? bomAll : null });
+    const welds = this.model.objects.filter((o) => o.type === 'weld' && this.model.isVisible(o)).map((o) => ({ a: o.params.a, L: o.params.L, mid: new THREE.Vector3(o.params.L / 2, 0, 0).applyMatrix4(this.model.worldMatrix(o)) }));
+    const full = () => ({ ...opts, bom: opts.withBom ? bomAll : null, welds: opts.withWelds ? welds : null });
     const prev = E('div', { class: 'drawing-preview' });
     const scaleInfo = E('b', {}, '');
     let layout = null;
@@ -2326,7 +2524,7 @@ class App {
       E('div', { class: 'drawing-wrap' }, prev, E('div', { class: 'drawing-opts' },
         E('div', { class: 'field' }, E('label', {}, 'Format'), paper), E('div', { class: 'note', style: 'margin-bottom:6px' }, scaleInfo),
         E('h4', {}, 'Vues'), ...Object.keys(views).map((v) => cb(v, views, v, true)),
-        E('h4', {}, 'Options'), cb('Lignes cachées', opts, 'hidden', true), cb('Cotes d\'encombrement', opts, 'dims'), cb('Nomenclature', opts, 'withBom'),
+        E('h4', {}, 'Options'), cb('Lignes cachées', opts, 'hidden', true), cb('Cotes d\'encombrement', opts, 'dims'), cb('Nomenclature', opts, 'withBom'), welds.length ? cb(`Symboles de soudure (${welds.length})`, opts, 'withWelds') : null,
         E('h4', {}, 'Cartouche'), txt('Titre', opts, 'title'), txt('Société', opts.fields, 'societe'), txt('Dessiné par', opts.fields, 'auteur'), txt('Matière', opts.fields, 'matiere'), txt('Indice', opts.fields, 'indice'),
         E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: () => { if (layout) { download(EX.drawingToDxf(layout, full()), n + '_plan.dxf', 'application/dxf'); this.toast('Plan exporté en DXF (échelle papier, cotes en vraie grandeur)'); } }, html: icon('export', 16) + 'Télécharger DXF' }),
         E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (layout) this.printSvg(EX.drawingToSvg(layout, full()), opts.paper); }, html: icon('drawing', 16) + 'Imprimer / PDF' }),

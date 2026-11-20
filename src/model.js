@@ -1,7 +1,7 @@
 // Modèle du document : objets, transformations, reconstruction paramétrique et booléens
 import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
-import { BASIC, buildHole, buildWeld, clean, prism, lathe, DEG } from './shapes.js';
+import { BASIC, buildHole, buildWeld, clean, prism, prismEdges, lathe, DEG } from './shapes.js';
 import { buildPart, partLabel } from './library.js';
 import { buildSheet, sheetLabel } from './sheet.js';
 import { sketchShapes, revolveProfiles } from './sketch.js';
@@ -165,7 +165,7 @@ export class Model {
         const shapes = sketchShapes(sk.params.entities);
         if (!shapes.length) throw new Error('Aucun contour fermé dans l\'esquisse');
         const h = Math.max(0.01, p.h);
-        const g = prism(shapes, h);
+        const g = prismEdges(shapes, h, p.edge, p.er);
         if (p.dir === 'Inverse') g.translate(0, 0, -h);
         if (p.dir === 'Symétrique') g.translate(0, 0, -h / 2);
         return clean(g);

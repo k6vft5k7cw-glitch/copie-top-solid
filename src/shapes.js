@@ -80,6 +80,53 @@ export function makeShape(outer, holes = []) {
   return s;
 }
 
+/** Extrusion avec congé ou chanfrein sur les arêtes du dessus et du dessous */
+export function prismEdges(shape, h, edge = 'Aucun', er = 0) {
+  const shapes = Array.isArray(shape) ? shape : [shape];
+  const c = Math.min(er || 0, h / 2 - 0.01);
+  if (!edge || edge === 'Aucun' || c <= 0.01) return prism(shapes, h);
+  return new THREE.ExtrudeGeometry(shapes, {
+    depth: h - 2 * c, bevelEnabled: true, bevelThickness: c, bevelSize: c, bevelOffset: -c,
+    bevelSegments: edge === 'Congé' ? 6 : 1, curveSegments: 24,
+  }).translate(0, 0, c);
+}
+
+/** Tige filetée ISO réelle (profil trapézoïdal à 60°, pas à droite), de z0 à z0+L, avec chanfrein en bout */
+export function threadedRod(d, pitch, L, z0 = 0, tipAtStart = true) {
+  const rmaj = d / 2, rmin = d / 2 - 0.6134 * pitch;
+  const n = 48, rows = Math.max(4, Math.ceil((L / pitch) * 10));
+  const prof = (u) => {
+    u -= Math.floor(u);
+    if (u < 0.125) return 1;
+    if (u < 0.4375) return 1 - (u - 0.125) / 0.3125;
+    if (u < 0.6875) return 0;
+    return (u - 0.6875) / 0.3125;
+  };
+  const pos = [], idx = [];
+  for (let j = 0; j <= rows; j++) {
+    const z = z0 + (L * j) / rows;
+    const tip = tipAtStart ? z - z0 : z0 + L - z;
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      let r = rmin + (rmaj - rmin) * prof(z / pitch - t / (Math.PI * 2));
+      r = Math.min(r, rmin + Math.max(0, tip) * 0.9 + 0.05);
+      pos.push(r * Math.cos(t), r * Math.sin(t), z);
+    }
+  }
+  for (let j = 0; j < rows; j++) for (let i = 0; i < n; i++) {
+    const a = j * n + i, b = j * n + ((i + 1) % n), c = (j + 1) * n + ((i + 1) % n), e = (j + 1) * n + i;
+    idx.push(a, b, c, a, c, e);
+  }
+  const c0 = pos.length / 3; pos.push(0, 0, z0);
+  const c1 = pos.length / 3; pos.push(0, 0, z0 + L);
+  for (let i = 0; i < n; i++) { idx.push(c0, (i + 1) % n, i); idx.push(c1, rows * n + i, rows * n + ((i + 1) % n)); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 export function prism(shape, h, z0 = 0) {
   const shapes = Array.isArray(shape) ? shape : [shape];
   return new THREE.ExtrudeGeometry(shapes, { depth: h, bevelEnabled: false, curveSegments: 24 }).translate(0, 0, z0);
@@ -150,14 +197,15 @@ export const BASIC = {
   plate: {
     label: 'Plaque percée', icon: 'plate',
     params: [P('l', 'Longueur (X)', 120), P('w', 'Largeur (Y)', 80), P('h', 'Épaisseur', 8), P('r', 'Rayon des coins', 5),
-      P('hd', 'Ø des 4 trous', 9), P('m', 'Distance trous / bord', 10)],
+      P('hd', 'Ø des 4 trous', 9), P('m', 'Distance trous / bord', 10),
+      { k: 'edge', label: 'Arêtes haut / bas', def: 'Aucun', options: ['Aucun', 'Congé', 'Chanfrein'] }, P('er', 'Taille congé / chanfrein', 1)],
     build: (p) => {
       const holes = [];
       if (p.hd > 0) {
         const x = p.l / 2 - p.m, y = p.w / 2 - p.m;
         for (const [sx, sy] of [[1, 1], [-1, 1], [-1, -1], [1, -1]]) holes.push(circlePts(p.hd / 2, 32, sx * x, sy * y).reverse());
       }
-      return prism(makeShape(roundRectPts(p.l, p.w, p.r), holes), p.h);
+      return prismEdges(makeShape(roundRectPts(p.l, p.w, p.r), holes), p.h, p.edge, p.er);
     },
   },
 };

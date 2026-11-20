@@ -2,7 +2,8 @@
 // Toutes les géométries sont générées de façon paramétrique : aucune donnée propriétaire.
 import * as THREE from 'three';
 import { elbowSolid } from './sheet.js';
-import { cyl, cone, prism, makeShape, circlePts, polyPts, arcPts, roundRectPts, slotPts, lathe, merge, orientAxis } from './shapes.js';
+import { THREADS } from './calc.js';
+import { threadedRod, cyl, cone, prism, makeShape, circlePts, polyPts, arcPts, roundRectPts, slotPts, lathe, merge, orientAxis } from './shapes.js';
 
 const LENGTHS = [4, 5, 6, 8, 10, 12, 16, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180, 200];
 const hexR = (s) => s / Math.sqrt(3); // rayon circonscrit d'un six pans de cote sur plats s
@@ -11,8 +12,10 @@ const L = (def = 20) => ({ k: 'L', label: 'Longueur', def, unit: 'mm', options: 
 const LEN = (def = 500) => ({ k: 'L', label: 'Longueur', def, unit: 'mm', min: 1 });
 const AXIS = { k: 'axis', label: 'Orientation', def: 'X', options: ['X', 'Y', 'Z'] };
 
-function shank(d, Lg) {
-  return cyl(d / 2, Lg, -Lg, 32);
+const THREAD = { k: 'thread', label: 'Filetage', def: 'Simplifié', options: ['Simplifié', 'Réel (hélicoïdal)'] };
+const pitchOf = (d) => (THREADS['M' + d] || [d * 0.15])[0];
+function shank(d, Lg, p = {}) {
+  return p.thread && p.thread.startsWith('Réel') ? threadedRod(d, pitchOf(d), Lg, -Lg, true) : cyl(d / 2, Lg, -Lg, 32);
 }
 
 const families = [
@@ -25,11 +28,11 @@ const families = [
       M10: [10, 16, 10, 8, 5], M12: [12, 18, 12, 10, 6], M14: [14, 21, 14, 12, 7], M16: [16, 24, 16, 14, 8],
       M20: [20, 30, 20, 17, 10], M24: [24, 36, 24, 19, 12],
     },
-    extra: [L(20)], defSize: 'M6',
+    extra: [L(20), THREAD], defSize: 'M6',
     build: ([d, dk, k, s, t], p) => merge([
       cyl(dk / 2, k - t, 0, 48),
       prism(makeShape(circlePts(dk / 2, 48), [polyPts(6, hexR(s))]), t, k - t),
-      shank(d, p.L),
+      shank(d, p.L, p),
     ]),
     label: (sz, p) => `Vis CHC ${sz}x${p.L}`,
   },
@@ -40,8 +43,8 @@ const families = [
       M3: [3, 5.5, 2], M4: [4, 7, 2.8], M5: [5, 8, 3.5], M6: [6, 10, 4], M8: [8, 13, 5.3], M10: [10, 16, 6.4], M12: [12, 18, 7.5],
       M14: [14, 21, 8.8], M16: [16, 24, 10], M20: [20, 30, 12.5], M24: [24, 36, 15],
     },
-    extra: [L(25)], defSize: 'M8',
-    build: ([d, s, k], p) => merge([prism(makeShape(polyPts(6, hexR(s))), k), shank(d, p.L)]),
+    extra: [L(25), THREAD], defSize: 'M8',
+    build: ([d, s, k], p) => merge([prism(makeShape(polyPts(6, hexR(s))), k), shank(d, p.L, p)]),
     label: (sz, p) => `Vis H ${sz}x${p.L}`,
   },
   {
@@ -51,10 +54,15 @@ const families = [
       M3: [3, 6.72, 2], M4: [4, 8.96, 2.5], M5: [5, 11.2, 3], M6: [6, 13.44, 4], M8: [8, 17.92, 5], M10: [10, 22.4, 6],
       M12: [12, 26.88, 8], M16: [16, 33.6, 10], M20: [20, 40.32, 12],
     },
-    extra: [L(20)], defSize: 'M6',
+    extra: [L(20), THREAD], defSize: 'M6',
     build: ([d, dk, s], p) => {
       const hc = (dk - d) / 2;
       const t = Math.min(hc * 0.8, s * 0.6);
+      if (p.thread && p.thread.startsWith('Réel')) return merge([
+        lathe([[0, -hc - 0.01], [d / 2, -hc - 0.01], [dk / 2, -t], [0, -t]], 48),
+        threadedRod(d, pitchOf(d), p.L - hc, -p.L, true),
+        prism(makeShape(circlePts(dk / 2, 48), [polyPts(6, hexR(s))]), t, -t),
+      ]);
       return merge([
         lathe([[0, -p.L], [d / 2, -p.L], [d / 2, -hc], [dk / 2, -t], [0, -t]], 48),
         prism(makeShape(circlePts(dk / 2, 48), [polyPts(6, hexR(s))]), t, -t),
@@ -66,13 +74,14 @@ const families = [
     id: 'iso7380', cat: 'Visserie', name: 'Vis BHC – tête bombée six pans creux', std: 'ISO 7380',
     cols: ['d', 'dk', 'k'],
     sizes: { M3: [3, 5.7, 1.65], M4: [4, 7.6, 2.2], M5: [5, 9.5, 2.75], M6: [6, 10.5, 3.3], M8: [8, 14, 4.4], M10: [10, 17.5, 5.5], M12: [12, 21, 6.6] },
-    extra: [L(12)], defSize: 'M5',
+    extra: [L(12), THREAD], defSize: 'M5',
     build: ([d, dk, k], p) => {
       const dome = [];
       for (let i = 0; i <= 12; i++) {
         const a = (i / 12) * (Math.PI / 2);
         dome.push([(dk / 2) * Math.cos(a), k * Math.sin(a)]);
       }
+      if (p.thread && p.thread.startsWith('Réel')) return merge([lathe([[0, 0], [dk / 2, 0], ...dome.slice(1), [0, k]], 48), shank(d, p.L, p)]);
       return merge([lathe([[0, -p.L], [d / 2, -p.L], [d / 2, 0], ...dome, [0, k]], 48)]);
     },
     label: (sz, p) => `Vis BHC ${sz}x${p.L}`,
@@ -81,9 +90,9 @@ const families = [
     id: 'iso4026', cat: 'Visserie', name: 'Vis sans tête six pans creux bout plat', std: 'ISO 4026',
     cols: ['d', 's'],
     sizes: { M3: [3, 1.5], M4: [4, 2], M5: [5, 2.5], M6: [6, 3], M8: [8, 4], M10: [10, 5], M12: [12, 6] },
-    extra: [L(10)], defSize: 'M6',
+    extra: [L(10), THREAD], defSize: 'M6',
     build: ([d, s], p) => merge([
-      cyl(d / 2, p.L - s, -p.L, 32),
+      p.thread && p.thread.startsWith('Réel') ? threadedRod(d, pitchOf(d), p.L - s, -p.L, true) : cyl(d / 2, p.L - s, -p.L, 32),
       prism(makeShape(circlePts(d / 2, 32), [polyPts(6, hexR(s))]), s, -s),
     ]),
     label: (sz, p) => `Vis STHC ${sz}x${p.L}`,
@@ -92,8 +101,8 @@ const families = [
     id: 'din975', cat: 'Visserie', name: 'Tige filetée', std: 'DIN 975',
     cols: ['d'],
     sizes: { M3: [3], M4: [4], M5: [5], M6: [6], M8: [8], M10: [10], M12: [12], M16: [16], M20: [20], M24: [24] },
-    extra: [LEN(200)], defSize: 'M8',
-    build: ([d], p) => cyl(d / 2, p.L, 0, 32),
+    extra: [LEN(200), THREAD], defSize: 'M8',
+    build: ([d], p) => (p.thread && p.thread.startsWith('Réel') ? threadedRod(d, pitchOf(d), p.L, 0, true) : cyl(d / 2, p.L, 0, 32)),
     label: (sz, p) => `Tige filetée ${sz} L${p.L}`,
   },
   {

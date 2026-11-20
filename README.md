@@ -21,6 +21,7 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 | Domaine | Ce que vous pouvez faire |
 |---|---|
 | **Esquisse 2D** | Ligne, rectangle, rectangle centré, cercle, arc, polygone, oblong ; aimantation grille, extrémités, centres et milieux ; **saisie des cotes au clavier** (`50`, `50<30`, `80;40`) ; traits de construction ; esquisse sur les plans XY / XZ / YZ ou **directement sur une face** d'un solide ; détection automatique des contours fermés et des trous |
+| **Esquisse intelligente** | **Congé et chanfrein de coin** (clic sur le coin), **contraintes** horizontal / vertical / parallèle / perpendiculaire / égal / concentrique, **points déplaçables à la souris** (les lignes connectées suivent), **cotes affichées et cliquables** pour les modifier |
 | **Volumes** | Extrusion (normale, inverse, symétrique), **poche** (enlèvement), **révolution** ; bloc, cylindre, tube, cône, sphère, tore, coin, plaque percée — tout reste **paramétrique** et modifiable |
 | **Usinage** | **Perçage** en un clic sur une face : simple, **lamé** (vis CHC), **fraisé** (vis FHC), débouchant ou borgne, préréglages ISO (passage et taraudage M3 à M20) |
 | **Chaudronnerie** | Générateurs 3D paramétriques avec **développé à plat exact** (fibre neutre) : **virole**, **tronc de cône** droit ou excentré, **coude segmenté**, **piquage** tube sur tube (avec excentration et découpe du tube principal), **transitions carré-rond et rectangle-rectangle** (centrées ou décalées) ; surface, masse du flan, lignes de pliage / roulage ; export **DXF** (calques CONTOUR, PLIAGE, AXE, TEXTE), SVG, PDF, ou conversion en esquisse |
@@ -39,7 +40,8 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 | **Assemblage** | **Contact face contre face** en 2 clics, **vue éclatée** réglable, **isoler** une sélection, cordons de soudure comptés en nomenclature |
 | **Plan pro** | Formats **A4 à A0**, **échelle normalisée automatique**, **cartouche** (société, dessinateur, indice, date, matière, masse) mémorisé, **nomenclature** sur le plan |
 | **Atelier** | **Nomenclature + débits** (profilés, tôles) en **CSV Excel**, **tous les développés en un ZIP** classés par épaisseur, **calculateurs** : ajustements **ISO 286** (H7/g6…), pliage (facteur K), masses, perçage / taraudage / lamage / couples de serrage |
-| **Rendu** | Ombres, matériaux réalistes (inox, galvanisé, Corten, alu anodisé…), couleurs **RAL** ; congés sur blocs, chanfreins sur cylindres |
+| **Rendu et finitions** | Ombres, matériaux réalistes (inox, galvanisé, Corten, alu anodisé…), couleurs **RAL** ; **congés / chanfreins des arêtes** (blocs, cylindres, extrusions, plaques) ; **filetage réel hélicoïdal** ISO sur vis et tiges filetées ; **poignées orange pour étirer** les pièces à la souris |
+| **Soudure** | Cordons en 2 clics, comptés en nomenclature, **symboles normalisés (ISO 2553) sur le plan** |
 | **Confort** | Annuler / rétablir illimité, calculs dans les champs (`120/2+5`), aides contextuelles en bas de l'écran, thème sombre, glisser-déposer de fichiers |
 
 ---
@@ -94,8 +96,8 @@ src/
 - Le noyau géométrique travaille en **maillage** (facettes) : l'export STEP est un B-rep à facettes, parfaitement
   lisible par les autres logiciels, mais les cylindres y sont des facettes et non des surfaces exactes.
   L'export **DXF d'esquisse** conserve, lui, les cercles et arcs exacts.
-- Pas encore de congés / chanfreins, de contraintes d'esquisse ni de contraintes d'assemblage.
-- Les filetages sont représentés de façon simplifiée (cylindre au diamètre nominal), comme dans la plupart des CAO.
+- Les contraintes d'esquisse s'appliquent à la demande (pas de solveur permanent) ; les congés / chanfreins 3D portent sur les arêtes haut / bas des extrusions et plaques (et toutes les arêtes des blocs).
+- Filetage réel disponible sur les vis et tiges ; les écrous restent simplifiés.
 - Les catalogues des fabricants ne peuvent pas être intégrés directement (licences propriétaires) : FormaCAD les
   importe au format STEP.
 

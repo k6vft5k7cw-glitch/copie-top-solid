@@ -200,6 +200,8 @@ const HINTS = {
   circle: ['Cliquez le centre (ou tapez x;y)', 'Cliquez un point du cercle ou tapez le diamètre'],
   arc: ['Cliquez le centre de l\'arc', 'Cliquez le point de départ (rayon)', 'Cliquez le point d\'arrivée (sens trigonométrique) ou tapez l\'angle'],
   polygon: ['Cliquez le centre du polygone', 'Cliquez un sommet ou tapez le diamètre circonscrit'],
+  fillet: 'Cliquez le coin à arrondir (rayon : tapez une valeur puis Entrée)',
+  chamfer: 'Cliquez le coin à chanfreiner (taille : tapez une valeur puis Entrée)',
   slot: ['Cliquez le centre du 1er arrondi', 'Cliquez le centre du 2e arrondi ou tapez l\'entraxe', 'Cliquez pour la largeur ou tapez-la'],
 };
 
@@ -241,6 +243,7 @@ export class SketchEditor {
     const app = this.app;
     let best = null, bestD = 12; // pixels
     const tryPt = (p, kind) => {
+      if (this.drag && dist(p, this.drag.cur) < 1e-9) return;
       const s = app.viewer.toScreen(this.toWorld(p));
       const d = Math.hypot(s.x - ev.clientX, s.y - ev.clientY);
       if (d < bestD) { bestD = d; best = { p: [p[0], p[1]], kind }; }
@@ -297,6 +300,7 @@ export class SketchEditor {
   onClick(ev) {
     const p = this.cursor.slice();
     if (this.tool === 'select') return this.pick(ev);
+    if (this.tool === 'fillet' || this.tool === 'chamfer') return this.cornerOp(ev, this.tool);
     this.addPoint(p);
   }
 
@@ -342,6 +346,11 @@ export class SketchEditor {
   applyTyped(txt) {
     txt = txt.trim().replace(/,/g, '.');
     if (!txt) return;
+    if (this.tool === 'fillet' || this.tool === 'chamfer') {
+      const v = parseFloat(txt);
+      if (v > 0) { this.cornerSize = v; this.app.toast(`${this.tool === 'fillet' ? 'Rayon' : 'Chanfrein'} : ${v} mm — cliquez les coins`); }
+      return;
+    }
     const P = this.pts, t = this.tool;
     const nums = txt.split(/[;x*\s]+/).map(Number).filter((v) => !isNaN(v));
     const polar = txt.match(/^(-?[\d.]+)\s*<\s*(-?[\d.]+)$/);
@@ -412,6 +421,171 @@ export class SketchEditor {
       if (this.selected.has(best)) this.selected.delete(best); else this.selected.add(best);
     }
     this.app.sketchChanged(false);
+  }
+
+
+  // ------------------------------------------------------------ points, coins, contraintes
+  /** Déplace un point et tous les points confondus (extrémités connectées) */
+  movePoint(oldP, newP, tol = 1e-6) {
+    const o = oldP.slice();
+    for (const e of this.entities) {
+      for (const k of ['a', 'b']) if (e[k] && (e.type === 'line' || e.type === 'slot') && dist(e[k], o) < tol) e[k] = newP.slice();
+      if (e.type === 'poly') e.pts = e.pts.map((q) => (dist(q, o) < tol ? newP.slice() : q));
+    }
+  }
+
+  /** Convertit rectangle / polygone en lignes indépendantes */
+  explode(i) {
+    const e = this.entities[i];
+    if (!e || !(e.type === 'rect' || e.type === 'polygon' || (e.type === 'poly' && e.pts.length < 200))) return false;
+    const { pts, closed } = entityPolyline(e);
+    const lines = [];
+    const n = closed ? pts.length : pts.length - 1;
+    for (let k = 0; k < n; k++) lines.push({ type: 'line', a: pts[k].slice(), b: pts[(k + 1) % pts.length].slice(), construction: e.construction });
+    this.entities.splice(i, 1, ...lines);
+    return true;
+  }
+
+  findCorner(p, tol) {
+    const near = [];
+    this.entities.forEach((e, i) => { if (e.type === 'line') for (const k of ['a', 'b']) if (dist(e[k], p) < tol) near.push({ i, k }); });
+    if (near.length >= 2) {
+      const P = this.entities[near[0].i][near[0].k];
+      const same = near.filter((n) => dist(this.entities[n.i][n.k], P) < 1e-6);
+      if (same.length === 2) return { P: P.slice(), n1: same[0], n2: same[1] };
+    }
+    return null;
+  }
+
+  cornerOp(ev, kind) {
+    const l = this.localFromEvent(ev);
+    if (!l) return;
+    const p = [l.x, l.y];
+    const tol = 12 * this.app.viewer.worldPerPixel(this.toWorld(p));
+    let c = this.findCorner(p, tol);
+    if (!c) {
+      // coin d'un rectangle / polygone : on le décompose en lignes
+      const idx = this.entities.findIndex((e) => (e.type === 'rect' || e.type === 'polygon' || e.type === 'poly') && entityPolyline(e).pts.some((q) => dist(q, p) < tol));
+      if (idx >= 0 && this.explode(idx)) c = this.findCorner(p, tol);
+    }
+    if (!c) { this.app.toast('Cliquez exactement sur un coin entre deux lignes', true); return; }
+    const L1 = this.entities[c.n1.i], L2 = this.entities[c.n2.i];
+    const o1 = c.n1.k === 'a' ? L1.b : L1.a, o2 = c.n2.k === 'a' ? L2.b : L2.a;
+    const len1 = dist(c.P, o1), len2 = dist(c.P, o2);
+    const u1 = [(o1[0] - c.P[0]) / len1, (o1[1] - c.P[1]) / len1], u2 = [(o2[0] - c.P[0]) / len2, (o2[1] - c.P[1]) / len2];
+    const cosA = Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1]));
+    const phi = Math.acos(cosA);
+    if (phi < 1e-3 || phi > Math.PI - 1e-3) { this.app.toast('Les deux lignes sont alignées', true); return; }
+    const size = this.cornerSize || 5;
+    const t = kind === 'fillet' ? size / Math.tan(phi / 2) : size;
+    if (t >= Math.min(len1, len2) - 1e-6) { this.app.toast('Rayon trop grand pour ces lignes', true); return; }
+    const T1 = [c.P[0] + u1[0] * t, c.P[1] + u1[1] * t], T2 = [c.P[0] + u2[0] * t, c.P[1] + u2[1] * t];
+    L1[c.n1.k] = T1; L2[c.n2.k] = T2;
+    if (kind === 'chamfer') this.entities.push({ type: 'line', a: T1, b: T2 });
+    else {
+      const bx = u1[0] + u2[0], by = u1[1] + u2[1], bl = Math.hypot(bx, by);
+      const dC = size / Math.sin(phi / 2);
+      const C = [c.P[0] + (bx / bl) * dC, c.P[1] + (by / bl) * dC];
+      let a1 = Math.atan2(T1[1] - C[1], T1[0] - C[0]) / D2R, a2 = Math.atan2(T2[1] - C[1], T2[0] - C[0]) / D2R;
+      let sw = a2 - a1; while (sw <= 0) sw += 360;
+      if (sw > 180) [a1, a2] = [a2, a1];
+      this.entities.push({ type: 'arc', c: C, r: size, a0: a1, a1: a2 });
+    }
+    this.app.sketchChanged();
+  }
+
+  /** Contraintes appliquées à la sélection (dans l'ordre de sélection) */
+  constrain(kind) {
+    const sel = [...this.selected].map((i) => this.entities[i]).filter(Boolean);
+    const lines = sel.filter((e) => e.type === 'line');
+    const rounds = sel.filter((e) => e.type === 'circle' || e.type === 'arc' || e.type === 'polygon');
+    const setEnd = (e, nb) => { const old = e.b.slice(); e.b = nb; this.movePoint(old, nb); e.b = nb; };
+    const ang = (e) => Math.atan2(e.b[1] - e.a[1], e.b[0] - e.a[0]);
+    const len = (e) => dist(e.a, e.b);
+    const need = (n, what) => { this.app.toast(`Sélectionnez ${n} ${what} (outil Sélection, Maj + clic)`, true); };
+    switch (kind) {
+      case 'H': case 'V':
+        if (!lines.length) return need('une ou plusieurs', 'lignes');
+        for (const e of lines) setEnd(e, kind === 'H' ? [e.b[0], e.a[1]] : [e.a[0], e.b[1]]);
+        break;
+      case 'parallel': case 'perp': {
+        if (lines.length < 2) return need('deux', 'lignes');
+        const a0 = ang(lines[0]);
+        for (const e of lines.slice(1)) {
+          let t = a0 + (kind === 'perp' ? Math.PI / 2 : 0);
+          // garder le sens le plus proche de l'actuel
+          const cur = ang(e);
+          if (Math.cos(t - cur) < 0) t += Math.PI;
+          const L = len(e);
+          setEnd(e, [e.a[0] + L * Math.cos(t), e.a[1] + L * Math.sin(t)]);
+        }
+        break;
+      }
+      case 'equal':
+        if (lines.length >= 2) {
+          const L0 = len(lines[0]);
+          for (const e of lines.slice(1)) { const t = ang(e); setEnd(e, [e.a[0] + L0 * Math.cos(t), e.a[1] + L0 * Math.sin(t)]); }
+        } else if (rounds.length >= 2) {
+          for (const e of rounds.slice(1)) e.r = rounds[0].r;
+        } else return need('deux', 'lignes ou deux cercles');
+        break;
+      case 'concentric':
+        if (rounds.length < 2) return need('deux', 'cercles / arcs');
+        for (const e of rounds.slice(1)) e.c = rounds[0].c.slice();
+        break;
+    }
+    this.app.sketchChanged();
+  }
+
+  // ------------------------------------------------------------ glisser des points à la souris
+  grabbable() {
+    const g = [];
+    this.entities.forEach((e, i) => {
+      if (e.type === 'line' || e.type === 'slot') { g.push({ i, k: 'a', p: e.a }); g.push({ i, k: 'b', p: e.b }); }
+      if (e.type === 'circle' || e.type === 'arc' || e.type === 'polygon') g.push({ i, k: 'c', p: e.c });
+      if (e.type === 'rect') rectPts(e).forEach((q, j) => g.push({ i, k: 'r' + j, p: q }));
+    });
+    return g;
+  }
+
+  onDown(ev) {
+    if (this.tool !== 'select') return false;
+    let best = null, bd = 10;
+    for (const g of this.grabbable()) {
+      const sc = this.app.viewer.toScreen(this.toWorld(g.p));
+      const d = Math.hypot(sc.x - ev.clientX, sc.y - ev.clientY);
+      if (d < bd) { bd = d; best = g; }
+    }
+    if (!best) return false;
+    this.drag = { ...best, cur: best.p.slice(), moved: false };
+    return true;
+  }
+
+  onDrag(ev) {
+    const d = this.drag;
+    const l = this.localFromEvent(ev);
+    if (!d || !l) return;
+    const np = this.snap(l, ev).p;
+    if (dist(np, d.cur) < 1e-9) return;
+    const e = this.entities[d.i];
+    if (d.k === 'a' || d.k === 'b') { this.movePoint(d.cur, np); e[d.k] = np.slice(); }
+    else if (d.k === 'c') e.c = np.slice();
+    else {
+      const pts = rectPts(e), j = +d.k.slice(1), opp = pts[(j + 2) % 4];
+      e.x = Math.min(opp[0], np[0]); e.y = Math.min(opp[1], np[1]); e.w = Math.abs(np[0] - opp[0]); e.h = Math.abs(np[1] - opp[1]);
+      d.k = 'r' + rectPts(e).findIndex((q) => dist(q, np) < 1e-6);
+      if (d.k === 'r-1') d.k = 'r0';
+    }
+    d.cur = np.slice();
+    d.moved = true;
+    this.app.sketchChanged(false);
+  }
+
+  onUp() {
+    const d = this.drag;
+    this.drag = null;
+    if (d && d.moved) this.app.sketchChanged(true);
+    return !!(d && d.moved);
   }
 
   deleteSelected() {

@@ -80,6 +80,13 @@ const P = {
   weld: 'M3 20h18 M6 20l6-12 6 12 M9 14h6 M12 4v2',
   list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
   calc: 'M5 3h14v18H5z M8 7h8 M8 11h2 M14 11h2 M8 15h2 M14 15h2 M8 18h2 M14 18h2',
+  filletc: 'M4 20V12a8 8 0 0 1 8-8h8 M4 4h4 M4 4v4',
+  chamferc: 'M4 20V10l6-6h10 M4 4h3 M4 4v3',
+  horiz: 'M3 12h18 M7 8v8 M17 8v8',
+  vert: 'M12 3v18 M8 7h8 M8 17h8',
+  para: 'M5 19L15 5 M9 19L19 5',
+  perp: 'M5 19h14 M12 19V5 M12 15h4v4',
+  equal: 'M5 9h14 M5 15h14',
   detach: 'M8 8h8v8H8z M3 3l4 4 M21 21l-4-4',
 };
 
