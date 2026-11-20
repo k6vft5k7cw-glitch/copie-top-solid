@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 import { BASIC, buildHole, clean, prism, lathe, DEG } from './shapes.js';
 import { buildPart, partLabel } from './library.js';
+import { buildSheet, sheetLabel } from './sheet.js';
 import { sketchShapes, revolveProfiles } from './sketch.js';
 import { merge, creased } from './shapes.js';
 
@@ -29,7 +30,7 @@ export const ROLE_LABEL = { cut: 'Enlèvement', add: 'Union', inter: 'Intersecti
 
 export const TYPE_LABEL = {
   ...Object.fromEntries(Object.entries(BASIC).map(([k, v]) => [k, v.label])),
-  part: 'Composant normalisé', sketch: 'Esquisse', extrude: 'Extrusion', revolve: 'Révolution', hole: 'Perçage', mesh: 'Corps importé',
+  part: 'Composant normalisé', sheet: 'Chaudronnerie / tôlerie', sketch: 'Esquisse', extrude: 'Extrusion', revolve: 'Révolution', hole: 'Perçage', mesh: 'Corps importé',
 };
 
 export class Model {
@@ -133,6 +134,7 @@ export class Model {
     if (BASIC[o.type]) return clean(BASIC[o.type].build(p));
     switch (o.type) {
       case 'part': { const g = buildPart(p); return g ? clean(g) : null; }
+      case 'sheet': return buildSheet(p);
       case 'hole': return clean(buildHole(p));
       case 'mesh': {
         const b = this.blobs.get(p.blob);
@@ -214,7 +216,7 @@ export class Model {
   }
 
   displayName(o) {
-    return o.name || (o.type === 'part' ? partLabel(o.params) : TYPE_LABEL[o.type]);
+    return o.name || (o.type === 'part' ? partLabel(o.params) : o.type === 'sheet' ? sheetLabel(o.params) : TYPE_LABEL[o.type]);
   }
 
   color(o) {

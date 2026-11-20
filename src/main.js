@@ -5,9 +5,10 @@ import { Viewer } from './viewer.js';
 import { Model, MATERIALS, ROLE_LABEL, TYPE_LABEL } from './model.js';
 import { BASIC, HOLE_PRESETS, DEG } from './shapes.js';
 import { LIBRARY, CATEGORIES, familyById, partDefaults, partLabel, ONLINE_CATALOGS } from './library.js';
-import { SketchEditor, sketchObject3D, findLoops, ENTITY_FIELDS, ENTITY_NAMES } from './sketch.js';
+import { SketchEditor, sketchObject3D, findLoops, sketchShapes, ENTITY_FIELDS, ENTITY_NAMES } from './sketch.js';
 import * as EX from './exporters.js';
 import { importFile } from './importers.js';
+import { SHEET, SHEET_DEFAULTS, sheetFlat } from './sheet.js';
 import { icon, TYPE_ICON, FAMILY_ICON } from './icons.js';
 
 // ------------------------------------------------------------------ utilitaires DOM
@@ -148,7 +149,7 @@ class App {
       ['redo', 'Rétablir (Ctrl+Y)', () => this.redo()],
     ];
     for (const [ic, t, fn] of quick) $('#quick').append(E('button', { title: t, html: icon(ic, 18), onclick: fn }));
-    const tabs = [['create', 'Créer'], ['modify', 'Modifier'], ['tools', 'Mesurer'], ['export', 'Plan & Export'], ['help', 'Aide']];
+    const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['modify', 'Modifier'], ['tools', 'Mesurer'], ['export', 'Plan & Export'], ['help', 'Aide']];
     for (const [id, label] of tabs) $('#tabs').append(E('button', { 'data-tab': id, onclick: () => { this.tab = id; this.renderRibbon(); } }, label));
 
     const vb = $('#viewbar');
@@ -221,6 +222,23 @@ class App {
         { g: 'Composants', b: [
           { label: 'Catalogue', ic: 'catalog', fn: () => this.showPane('lib'), title: 'Vis, écrous, roulements, profilés… (B)' },
           { label: 'Importer', ic: 'import', fn: () => this.openFile('.step,.stp,.iges,.igs,.brep,.stl,.obj,.glb,.gltf,.ply,.3mf,.dxf'), title: 'STEP, IGES, STL, OBJ, glTF, PLY, 3MF, DXF (I)' },
+        ] },
+      ];
+      case 'sheet': return [
+        { g: 'Tôlerie', b: [{ label: 'Tôle pliée', ic: 'bent', fn: () => this.placeSheet('bent'), title: 'Profil plié (U, L, Z, cornière…) avec facteur K et lignes de pliage' }] },
+        { g: 'Chaudronnerie (développés)', b: [
+          { label: 'Virole', ic: 'tube', fn: () => this.placeSheet('shell') },
+          { label: 'Tronc de cône', ic: 'cone', fn: () => this.placeSheet('cone'), title: 'Droit ou excentré (oblique)' },
+          { label: 'Coude segmenté', ic: 'elbow', fn: () => this.placeSheet('elbow'), title: 'Coude en tranches (« saucisson »)' },
+          { label: 'Piquage', ic: 'branch', fn: () => this.placeSheet('branch'), title: 'Tube sur tube, avec excentration, et trou du tube principal' },
+          { label: 'Carré-rond / trémie', ic: 'hopper', fn: () => this.placeSheet('transition'), title: 'Transition rectangle → rond ou rectangle → rectangle, centrée ou décalée' },
+        ] },
+        { g: 'Fabrication', b: [{ label: 'Développé (DXF)', ic: 'flat', primary: true, fn: () => { const o = this.selObjs().find((x) => x.type === 'sheet'); if (o) this.flatDialog(o); else this.toast('Sélectionnez une pièce de chaudronnerie / tôlerie', true); }, title: 'Mise à plat à la fibre neutre, prête pour laser / plasma / poinçonneuse' }] },
+        { g: 'Tuyauterie (catalogue)', b: [
+          { label: 'Brides', ic: 'plate', fn: () => this.libSearch('bride') },
+          { label: 'Coudes', ic: 'elbow', fn: () => this.libSearch('coude') },
+          { label: 'Tubes', ic: 'tube', fn: () => this.libSearch('EN 10220') },
+          { label: 'Fonds bombés', ic: 'sphere', fn: () => this.libSearch('fond') },
         ] },
       ];
       case 'modify': return [
@@ -685,6 +703,17 @@ class App {
       }
       const s = fam.sizes[o.params.size];
       ps.append(E('div', { class: 'info', style: 'margin-top:6px' }, ...fam.cols.flatMap((c, i) => [E('span', {}, c), E('b', {}, fmt(s[i]) + (c === 'm' || c === 'z' ? '' : ' mm'))])));
+    } else if (o.type === 'sheet') {
+      const def = SHEET[o.params.kind];
+      if (def.help) ps.append(E('div', { class: 'note', style: 'margin-bottom:8px' }, def.help));
+      for (const d of def.params) {
+        if (d.options) ps.append(this.selField(d.label, o.params[d.k], d.options, (v) => set(() => { o.params[d.k] = v; }), 'p.' + d.k));
+        else if (d.text) {
+          const t = E('input', { type: 'text', value: o.params[d.k], 'data-k': 'p.' + d.k, onchange: () => set(() => { o.params[d.k] = t.value; }) });
+          ps.append(E('div', { class: 'field' }, E('label', {}, d.label), t, E('span', { class: 'unit' })));
+        } else ps.append(this.numField(d.label, o.params[d.k], (v) => set(() => { o.params[d.k] = Math.max(d.min ?? 0.01, d.step === 1 ? Math.round(v) : v); }), d.unit, 'p.' + d.k));
+      }
+      ps.append(E('button', { class: 'btn big primary', style: 'margin-top:6px', onclick: () => this.flatDialog(o), html: icon('flat', 16) + 'Développé à plat (DXF)' }));
     } else if (o.type === 'extrude') {
       ps.append(this.numField('Hauteur', o.params.h, (v) => set(() => { o.params.h = Math.max(0.01, v); }), 'mm', 'p.h'));
       ps.append(this.selField('Sens', o.params.dir, ['Normale', 'Inverse', 'Symétrique'], (v) => set(() => { o.params.dir = v; }), 'p.dir'));
@@ -823,7 +852,7 @@ class App {
     if (sel.length === 1) {
       const e = o.params.entities[sel[0]];
       const s = E('div', { class: 'sec' }, E('h4', {}, ENTITY_NAMES[e.type] + (e.construction ? ' (construction)' : '')));
-      for (const [path, label] of ENTITY_FIELDS[e.type]) {
+      for (const [path, label] of ENTITY_FIELDS[e.type] || []) {
         const [k, i] = path.split('.');
         const val = i != null ? e[k][+i] : e[k];
         s.append(this.numField(label, val, (v) => {
@@ -965,6 +994,69 @@ class App {
     this.mode = 'normal';
     $('#cursorLabel').classList.add('hidden');
     this.refresh();
+  }
+
+  libSearch(q) {
+    this.showPane('lib');
+    const i = $('#libsearch');
+    i.value = q;
+    this.renderLibList(q);
+  }
+
+  placeSheet(kind) {
+    const params = SHEET_DEFAULTS(kind);
+    this.startPlace({ type: 'sheet', params, name: '' }, { hint: `Cliquez dans la vue pour poser : ${SHEET[kind].label} — Échap pour terminer. Réglez ensuite les cotes à droite.` });
+  }
+
+  flatDialog(o) {
+    let f;
+    try { f = sheetFlat(o.params); } catch (e) { return this.toast(e.message, true); }
+    const ents = f.entities, texts = f.texts || [];
+    const shapes = (() => { try { return sketchShapesArea(ents); } catch { return 0; } })();
+    const mass = (shapes * o.params.e / 1000) * (MATERIALS[o.material]?.density || 7.85);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const e of ents) for (const q of entityPts(e)) { minX = Math.min(minX, q[0]); minY = Math.min(minY, q[1]); maxX = Math.max(maxX, q[0]); maxY = Math.max(maxY, q[1]); }
+    const W = maxX - minX, H = maxY - minY, m = Math.max(W, H) * 0.08 + 10;
+    const sw = Math.max(W, H) / 700;
+    const path = ents.map((e) => {
+      const pts = entityPts(e);
+      const d = pts.map((q, i) => `${i ? 'L' : 'M'}${(q[0] - minX + m).toFixed(2)} ${(maxY - q[1] + m).toFixed(2)}`).join('') + (e.closed || e.type === 'circle' ? 'Z' : '');
+      const col = e.layer === 'PLIAGE' ? '#c62828' : e.construction ? '#888' : '#111';
+      return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${sw * (e.construction ? 1 : 1.8)}" ${e.construction ? `stroke-dasharray="${sw * 8} ${sw * 5}"` : ''}/>`;
+    }).join('');
+    const tx = texts.map((t) => `<text x="${t.p[0] - minX + m}" y="${maxY - t.p[1] + m}" font-size="${t.h * 1.4}" fill="${t.layer === 'PLIAGE' ? '#c62828' : '#1565c0'}" font-family="Arial">${esc(t.txt)}</text>`).join('');
+    const dims = `<g fill="#1565c0" font-family="Arial" font-size="${Math.max(W, H) / 45}"><text x="${m + W / 2}" y="${m * 0.6}" text-anchor="middle">${fmt(W, 1)} mm</text><text x="${m + W + m * 0.15}" y="${m + H / 2}">${fmt(H, 1)} mm</text></g>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W + 2 * m} ${H + 2 * m}" width="100%" height="100%"><rect width="100%" height="100%" fill="#fff"/>${path}${tx}${dims}</svg>`;
+    const name = safeName(this.model.displayName(o)) + '_developpe';
+    const toDxf = () => {
+      const dxf = new EX.DxfWriter();
+      EX.sketchToDxf(dxf, ents);
+      for (const t of texts) dxf.text(t.p, t.h, t.txt, dxf.layer(t.layer || 'TEXTE', 3));
+      return dxf.toString();
+    };
+    const rows = [
+      ['Encombrement du flan', `${fmt(W, 1)} × ${fmt(H, 1)} mm`],
+      ['Surface', `${fmt(shapes / 1e6, 4)} m²`],
+      ['Épaisseur / matériau', `${o.params.e} mm – ${o.material}`],
+      ['Masse du flan', mass >= 1000 ? `${fmt(mass / 1000, 2)} kg` : `${fmt(mass, 0)} g`],
+      ...f.info.map(([k, v]) => [k, typeof v === 'number' ? fmt(v, 2) + (/segments|°/.test(k) ? '' : ' mm') : v]),
+    ];
+    this.modal(E('div', {},
+      E('h2', { html: icon('flat', 22) + 'Développé – ' + esc(this.model.displayName(o)) }),
+      E('div', { class: 'drawing-wrap' },
+        E('div', { class: 'drawing-preview', html: svg }),
+        E('div', { class: 'drawing-opts', style: 'width:280px' },
+          E('div', { class: 'info', style: 'margin-bottom:10px' }, ...rows.flatMap(([k, v]) => [E('span', {}, k), E('b', {}, String(v))])),
+          E('div', { class: 'note' }, 'Calcul à la fibre neutre. Calques DXF : CONTOUR (découpe), PLIAGE (lignes de pli / roulage), AXE, TEXTE. Échelle 1:1 en mm.'),
+          E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: () => { download(toDxf(), name + '.dxf', 'application/dxf'); this.toast('Développé exporté en DXF'); }, html: icon('export', 16) + 'Télécharger DXF' }),
+          E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => download(svg.replace('width="100%" height="100%"', `width="${W + 2 * m}mm" height="${H + 2 * m}mm"`), name + '.svg', 'image/svg+xml'), html: icon('export', 16) + 'Télécharger SVG' }),
+          E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => {
+            const sk = this.model.add({ type: 'sketch', name: 'Développé ' + this.model.displayName(o), params: { entities: structuredClone(ents) } });
+            this.closeModal(); this.commit(); this.selection = [sk.id]; this.refresh(); this.setStdView('top');
+            this.toast('Développé ajouté comme esquisse : modifiable, extrudable, exportable');
+          }, html: icon('sketch', 16) + 'Créer une esquisse' }),
+          E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => this.printSvg(svg.replace('width="100%" height="100%"', '')), html: icon('drawing', 16) + 'Imprimer / PDF' }),
+          E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => this.closeModal() }, 'Fermer')))));
   }
 
   placeBasic(type) {
@@ -1734,6 +1826,23 @@ class App {
     this.setStdView('iso');
     this.toast('Exemple chargé : cliquez sur les objets pour voir et modifier leurs paramètres');
   }
+}
+
+function entityPts(e) {
+  if (e.type === 'poly') return e.pts;
+  if (e.type === 'line') return [e.a, e.b];
+  if (e.type === 'arc') { let a1 = e.a1; while (a1 <= e.a0) a1 += 360; const n = Math.max(8, Math.ceil((a1 - e.a0) / 3)); return Array.from({ length: n + 1 }, (_, i) => { const t = (e.a0 + ((a1 - e.a0) * i) / n) * Math.PI / 180; return [e.c[0] + e.r * Math.cos(t), e.c[1] + e.r * Math.sin(t)]; }); }
+  if (e.type === 'circle') return Array.from({ length: 73 }, (_, i) => [e.c[0] + e.r * Math.cos(i * Math.PI / 36), e.c[1] + e.r * Math.sin(i * Math.PI / 36)]);
+  return [];
+}
+
+function sketchShapesArea(ents) {
+  let a = 0;
+  for (const s of sketchShapes(ents)) {
+    a += Math.abs(THREE.ShapeUtils.area(s.getPoints()));
+    for (const h of s.holes) a -= Math.abs(THREE.ShapeUtils.area(h.getPoints()));
+  }
+  return a;
 }
 
 function isShown(o) {

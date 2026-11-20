@@ -70,6 +70,11 @@ const P = {
   play: 'M7 4l13 8-13 8z',
   search: 'M4 10a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 15l6 6',
   layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5',
+  bent: 'M3 6v12h6 M6 6v9h3 M9 18h12 M9 15h12 M3 6h3',
+  elbow: 'M4 20V12a8 8 0 0 1 8-8h8 M9 20v-8a3 3 0 0 1 3-3h8 M4 14h5 M6 8l4 3 M12 4v5',
+  branch: 'M2 14h20 M2 20h20 M8 14V3 M14 14V3 M8 3h6',
+  hopper: 'M3 4h18l-6 10v6H9v-6z M9 14h6',
+  flat: 'M3 7h18v10H3z M9 7v10 M15 7v10',
   detach: 'M8 8h8v8H8z M3 3l4 4 M21 21l-4-4',
 };
 
@@ -80,7 +85,7 @@ export function icon(name, size = 20) {
 
 export const TYPE_ICON = {
   box: 'box', cylinder: 'cylinder', tube: 'tube', cone: 'cone', sphere: 'sphere', torus: 'torus', wedge: 'wedge', plate: 'plate',
-  sketch: 'sketch', extrude: 'extrude', revolve: 'revolve', hole: 'hole', mesh: 'mesh', part: 'part',
+  sheet: 'bent', sketch: 'sketch', extrude: 'extrude', revolve: 'revolve', hole: 'hole', mesh: 'mesh', part: 'part',
 };
 
 export const FAMILY_ICON = (fam) => {
@@ -90,5 +95,8 @@ export const FAMILY_ICON = (fam) => {
   if (fam.id === 'gear') return 'gear';
   if (fam.id === 'spring') return 'spring';
   if (fam.cat.startsWith('Profil')) return 'beam';
+  if (fam.id === 'en10253') return 'elbow';
+  if (fam.id === 'en1092') return 'plate';
+  if (fam.cat.startsWith('Tuyauterie')) return 'tube';
   return 'part';
 };

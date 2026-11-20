@@ -46,6 +46,7 @@ export function entityPolyline(e) {
     case 'arc': return { pts: arcSample(e), closed: false };
     case 'polygon': return { pts: polygonPts(e), closed: true };
     case 'slot': return { pts: slotOutline(e), closed: true };
+    case 'poly': return { pts: e.pts, closed: !!e.closed };
   }
   return { pts: [], closed: false };
 }
@@ -59,6 +60,7 @@ export function snapPoints(e) {
     case 'arc': { const s = arcSample(e); return [e.c, s[0], s[s.length - 1]]; }
     case 'polygon': return [e.c, ...polygonPts(e)];
     case 'slot': return [e.a, e.b];
+    case 'poly': return e.pts.length > 400 ? [e.pts[0], e.pts[e.pts.length - 1]] : e.pts;
   }
   return [];
 }
@@ -475,6 +477,7 @@ export const ENTITY_FIELDS = {
   circle: [['c.0', 'X centre'], ['c.1', 'Y centre'], ['r', 'Rayon']],
   arc: [['c.0', 'X centre'], ['c.1', 'Y centre'], ['r', 'Rayon'], ['a0', 'Angle début (°)'], ['a1', 'Angle fin (°)']],
   polygon: [['c.0', 'X centre'], ['c.1', 'Y centre'], ['r', 'Rayon circonscrit'], ['n', 'Nombre de côtés'], ['rot', 'Rotation (°)']],
+  poly: [],
   slot: [['a.0', 'X centre 1'], ['a.1', 'Y centre 1'], ['b.0', 'X centre 2'], ['b.1', 'Y centre 2'], ['r', 'Rayon']],
 };
-export const ENTITY_NAMES = { line: 'Ligne', rect: 'Rectangle', circle: 'Cercle', arc: 'Arc', polygon: 'Polygone', slot: 'Oblong' };
+export const ENTITY_NAMES = { poly: 'Polyligne', line: 'Ligne', rect: 'Rectangle', circle: 'Cercle', arc: 'Arc', polygon: 'Polygone', slot: 'Oblong' };

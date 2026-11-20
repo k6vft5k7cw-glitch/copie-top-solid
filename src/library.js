@@ -1,6 +1,7 @@
 // Bibliothèque de composants normalisés (dimensions issues des normes ISO / DIN / EN)
 // Toutes les géométries sont générées de façon paramétrique : aucune donnée propriétaire.
 import * as THREE from 'three';
+import { elbowSolid } from './sheet.js';
 import { cyl, cone, prism, makeShape, circlePts, polyPts, arcPts, roundRectPts, slotPts, lathe, merge, orientAxis } from './shapes.js';
 
 const LENGTHS = [4, 5, 6, 8, 10, 12, 16, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180, 200];
@@ -286,6 +287,67 @@ const families = [
     label: (sz, p) => `Profilé alu ${sz.split(' ')[0]} L${p.L}`,
   },
 ];
+
+
+// ------------------------------------------------------------------ TUYAUTERIE / CHAUDRONNERIE
+const PIPE = { DN15: [21.3, 2], DN20: [26.9, 2.3], DN25: [33.7, 2.6], DN32: [42.4, 2.6], DN40: [48.3, 2.6], DN50: [60.3, 2.9], DN65: [76.1, 2.9], DN80: [88.9, 3.2], DN100: [114.3, 3.6], DN125: [139.7, 4], DN150: [168.3, 4.5], DN200: [219.1, 6.3], DN250: [273, 6.3], DN300: [323.9, 7.1] };
+families.push(
+  {
+    id: 'en1092', cat: 'Tuyauterie / chaudronnerie', name: 'Bride plate à souder PN16 (type 01)', std: 'EN 1092-1',
+    cols: ['d1', 'D', 'K', 'n', 'L', 'C'],
+    sizes: {
+      DN15: [21.3, 95, 65, 4, 14, 14], DN20: [26.9, 105, 75, 4, 14, 16], DN25: [33.7, 115, 85, 4, 14, 16], DN32: [42.4, 140, 100, 4, 18, 16],
+      DN40: [48.3, 150, 110, 4, 18, 16], DN50: [60.3, 165, 125, 4, 18, 18], DN65: [76.1, 185, 145, 8, 18, 18], DN80: [88.9, 200, 160, 8, 18, 20],
+      DN100: [114.3, 220, 180, 8, 18, 20], DN125: [139.7, 250, 210, 8, 18, 22], DN150: [168.3, 285, 240, 8, 22, 22], DN200: [219.1, 340, 295, 12, 22, 24],
+      DN250: [273, 405, 355, 12, 26, 26], DN300: [323.9, 460, 410, 12, 26, 28],
+    },
+    extra: [], defSize: 'DN100',
+    build: ([d1, D, K, n, Lh, C]) => {
+      const holes = [circlePts((d1 + 1) / 2, 64)];
+      for (let i = 0; i < n; i++) { const a = (Math.PI / n) + (i / n) * Math.PI * 2; holes.push(circlePts(Lh / 2, 24, (K / 2) * Math.cos(a), (K / 2) * Math.sin(a))); }
+      return prism(makeShape(circlePts(D / 2, 96), holes), C);
+    },
+    label: (sz) => `Bride plate ${sz} PN16`,
+  },
+  {
+    id: 'en10253', cat: 'Tuyauterie / chaudronnerie', name: 'Coude à souder 3D (rayon 1,5 D)', std: 'EN 10253',
+    cols: ['De', 'e'], sizes: Object.fromEntries(Object.entries(PIPE).filter(([k]) => +k.slice(2) >= 25)), defSize: 'DN100',
+    extra: [{ k: 'A', label: 'Angle', def: 90, unit: '°', options: [45, 90, 180] }],
+    build: ([De, e], p) => elbowSolid({ D: De, e, ref: 'Extérieur', R: Math.round(1.5 * De), A: p.A, N: 24 }, 48),
+    label: (sz, p) => `Coude ${p.A}° ${sz}`,
+  },
+  {
+    id: 'tube10220', cat: 'Tuyauterie / chaudronnerie', name: 'Tube acier soudé / sans soudure', std: 'EN 10220',
+    cols: ['De', 'e'], sizes: PIPE, defSize: 'DN100',
+    extra: [{ k: 'L', label: 'Longueur', def: 1000, unit: 'mm', min: 1 }, { k: 'axis', label: 'Orientation', def: 'Z', options: ['X', 'Y', 'Z'] }],
+    build: ([De, e], p) => orientAxis(prism(makeShape(circlePts(De / 2, 64), [circlePts(De / 2 - e, 64)]), p.L), p.axis),
+    label: (sz, p) => `Tube ${sz} L${p.L}`,
+  },
+  {
+    id: 'head', cat: 'Tuyauterie / chaudronnerie', name: 'Fond bombé (GRC Klöpper / elliptique)', std: 'DIN 28011 / 28013',
+    cols: ['De'], sizes: Object.fromEntries([219.1, 273, 323.9, 406.4, 508, 610, 711, 813, 1016, 1219, 1422, 1620].map((d) => ['Ø' + d, [d]])), defSize: 'Ø508',
+    extra: [{ k: 'kind', label: 'Type', def: 'GRC (Klöpper)', options: ['GRC (Klöpper)', 'Elliptique (Korbbogen)'] }, { k: 's', label: 'Épaisseur', def: 5, unit: 'mm', min: 0.5 }, { k: 'h1', label: 'Bord droit', def: 20, unit: 'mm', min: 0 }],
+    build: ([De], p) => headSolid(De, p.s, p.h1, p.kind.startsWith('GRC') ? 1 : 0.8, p.kind.startsWith('GRC') ? 0.1 : 0.154),
+    label: (sz, p) => `Fond ${p.kind.startsWith('GRC') ? 'GRC' : 'elliptique'} ${sz} ép.${p.s}`,
+  },
+);
+
+/** Fond torisphérique : calotte R = kR·De, carre r = kr·De, bord droit h1 */
+function headSolid(De, s, h1, kR, kr) {
+  const R = kR * De, r = kr * De, a = De / 2 - r;
+  const zs = -Math.sqrt(Math.max(0, (R - r) ** 2 - a * a));
+  const tEnd = Math.atan2(-zs, a);
+  const curve = (dr) => {
+    const pts = [];
+    for (let i = 0; i <= 16; i++) { const t = (tEnd * i) / 16; pts.push([a + (r - dr) * Math.cos(t), (r - dr) * Math.sin(t)]); }
+    const phi0 = Math.atan2(pts[pts.length - 1][1] - zs, pts[pts.length - 1][0]);
+    for (let i = 1; i <= 24; i++) { const t = phi0 + ((Math.PI / 2 - phi0) * i) / 24; pts.push([(R - dr) * Math.cos(t), zs + (R - dr) * Math.sin(t)]); }
+    return pts;
+  };
+  const outer = curve(0), inner = curve(s).reverse();
+  const prof = [[De / 2 - s, -h1], [De / 2, -h1], ...outer, ...inner];
+  return lathe(prof.map(([x, z]) => [Math.max(0, x), z + h1]), 96);
+}
 
 // ---------------------------------------------------------------- générateurs spécifiques
 function bearing(d, D, B, sealed) {

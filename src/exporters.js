@@ -54,7 +54,7 @@ export function sketchToDxf(dxf, entities, layer = 'CONTOUR', offset = [0, 0]) {
   const L = dxf.layer(layer, 7), LC = dxf.layer('CONSTRUCTION', 8);
   const tr = (p) => [p[0] + offset[0], p[1] + offset[1]];
   for (const e of entities) {
-    const ly = e.construction ? LC : L;
+    const ly = e.layer ? dxf.layer(e.layer, e.layer === 'PLIAGE' ? 1 : 8) : e.construction ? LC : L;
     if (e.type === 'line') dxf.line(tr(e.a), tr(e.b), ly);
     else if (e.type === 'circle') dxf.circle(tr(e.c), e.r, ly);
     else if (e.type === 'arc') dxf.arc(tr(e.c), e.r, e.a0, e.a1, ly);
