@@ -1,28 +1,41 @@
 // Modèle du document : objets, transformations, reconstruction paramétrique et booléens
 import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
-import { BASIC, buildHole, clean, prism, lathe, DEG } from './shapes.js';
+import { BASIC, buildHole, buildWeld, clean, prism, lathe, DEG } from './shapes.js';
 import { buildPart, partLabel } from './library.js';
 import { buildSheet, sheetLabel } from './sheet.js';
 import { sketchShapes, revolveProfiles } from './sketch.js';
 import { merge, creased } from './shapes.js';
 
 export const MATERIALS = {
-  'Acier': { density: 7.85, color: '#9aa4ad' },
-  'Acier inoxydable': { density: 7.9, color: '#c3c9cf' },
-  'Aluminium': { density: 2.7, color: '#d5d9de' },
-  'Laiton': { density: 8.5, color: '#d4b44a' },
-  'Cuivre': { density: 8.96, color: '#c77b4a' },
-  'Fonte': { density: 7.2, color: '#6d7378' },
-  'Titane': { density: 4.5, color: '#a8a39a' },
-  'PLA': { density: 1.24, color: '#4f9de0' },
-  'ABS': { density: 1.04, color: '#e8e2d4' },
-  'PETG': { density: 1.27, color: '#5fbf8f' },
-  'Nylon (PA)': { density: 1.14, color: '#efece4' },
-  'POM (Delrin)': { density: 1.41, color: '#f4f4f0' },
-  'Bois (chêne)': { density: 0.75, color: '#b08454' },
-  'Contreplaqué': { density: 0.6, color: '#d2b48c' },
-  'Caoutchouc': { density: 1.2, color: '#333638' },
+  'Acier': { density: 7.85, color: '#9aa4ad', metal: 0.55, rough: 0.42 },
+  'Acier inoxydable': { density: 7.9, color: '#c9ced3', metal: 0.75, rough: 0.28 },
+  'Acier galvanisé': { density: 7.85, color: '#b7bec4', metal: 0.6, rough: 0.55 },
+  'Acier Corten': { density: 7.85, color: '#8a4b2a', metal: 0.2, rough: 0.85 },
+  'Acier peint RAL 7035 (gris clair)': { density: 7.85, color: '#cbd0cc', metal: 0.05, rough: 0.5 },
+  'Acier peint RAL 5010 (bleu)': { density: 7.85, color: '#1e4f8a', metal: 0.05, rough: 0.45 },
+  'Acier peint RAL 3020 (rouge)': { density: 7.85, color: '#c1121c', metal: 0.05, rough: 0.45 },
+  'Acier peint RAL 1023 (jaune)': { density: 7.85, color: '#f0c000', metal: 0.05, rough: 0.45 },
+  'Acier peint RAL 6018 (vert)': { density: 7.85, color: '#57a639', metal: 0.05, rough: 0.45 },
+  'Acier peint RAL 9005 (noir)': { density: 7.85, color: '#1b1c1e', metal: 0.05, rough: 0.4 },
+  'Acier peint RAL 9010 (blanc)': { density: 7.85, color: '#f1ede1', metal: 0.05, rough: 0.45 },
+  'Aluminium': { density: 2.7, color: '#d5d9de', metal: 0.7, rough: 0.35 },
+  'Aluminium anodisé noir': { density: 2.7, color: '#2b2d31', metal: 0.5, rough: 0.35 },
+  'Laiton': { density: 8.5, color: '#d4b44a', metal: 0.85, rough: 0.3 },
+  'Bronze': { density: 8.8, color: '#b0793c', metal: 0.8, rough: 0.35 },
+  'Cuivre': { density: 8.96, color: '#c77b4a', metal: 0.85, rough: 0.3 },
+  'Fonte': { density: 7.2, color: '#6d7378', metal: 0.4, rough: 0.75 },
+  'Titane': { density: 4.5, color: '#a8a39a', metal: 0.7, rough: 0.4 },
+  'PLA': { density: 1.24, color: '#4f9de0', metal: 0, rough: 0.55 },
+  'ABS': { density: 1.04, color: '#e8e2d4', metal: 0, rough: 0.6 },
+  'PETG': { density: 1.27, color: '#5fbf8f', metal: 0, rough: 0.4 },
+  'Nylon (PA)': { density: 1.14, color: '#efece4', metal: 0, rough: 0.6 },
+  'POM (Delrin)': { density: 1.41, color: '#f4f4f0', metal: 0, rough: 0.45 },
+  'PEHD': { density: 0.95, color: '#f2f2ee', metal: 0, rough: 0.6 },
+  'Plexiglas (PMMA)': { density: 1.19, color: '#d8eef7', metal: 0, rough: 0.1 },
+  'Bois (chêne)': { density: 0.75, color: '#b08454', metal: 0, rough: 0.8 },
+  'Contreplaqué': { density: 0.6, color: '#d2b48c', metal: 0, rough: 0.8 },
+  'Caoutchouc': { density: 1.2, color: '#333638', metal: 0, rough: 0.9 },
 };
 
 export const ROLE_OPS = { cut: SUBTRACTION, add: ADDITION, inter: INTERSECTION };
@@ -30,7 +43,7 @@ export const ROLE_LABEL = { cut: 'Enlèvement', add: 'Union', inter: 'Intersecti
 
 export const TYPE_LABEL = {
   ...Object.fromEntries(Object.entries(BASIC).map(([k, v]) => [k, v.label])),
-  part: 'Composant normalisé', sheet: 'Chaudronnerie / tôlerie', sketch: 'Esquisse', extrude: 'Extrusion', revolve: 'Révolution', hole: 'Perçage', mesh: 'Corps importé',
+  part: 'Composant normalisé', sheet: 'Chaudronnerie / tôlerie', sketch: 'Esquisse', extrude: 'Extrusion', revolve: 'Révolution', hole: 'Perçage', weld: 'Cordon de soudure', mesh: 'Corps importé',
 };
 
 export class Model {
@@ -136,6 +149,7 @@ export class Model {
       case 'part': { const g = buildPart(p); return g ? clean(g) : null; }
       case 'sheet': return buildSheet(p);
       case 'hole': return clean(buildHole(p));
+      case 'weld': return clean(buildWeld(p));
       case 'mesh': {
         const b = this.blobs.get(p.blob);
         if (!b) return null;

@@ -34,8 +34,18 @@ export class Viewer {
     const hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.9);
     const dir = new THREE.DirectionalLight(0xffffff, 1.4);
     dir.position.set(1, -2, 3);
+    this.sun = dir;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(2048, 2048);
+    dir.shadow.bias = -0.0004;
+    dir.shadow.normalBias = 0.6;
+    this.shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.16 }));
+    this.shadowPlane.receiveShadow = true;
+    this.shadowPlane.renderOrder = -2;
     this.headLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    this.scene.add(hemi, dir, this.headLight, this.headLight.target);
+    this.scene.add(hemi, dir, dir.target, this.headLight, this.headLight.target, this.shadowPlane);
 
     this.world = new THREE.Group();
     this.scene.add(this.world);
@@ -66,6 +76,23 @@ export class Viewer {
       this.renderer.render(this.scene, this.camera);
     };
     loop();
+  }
+
+  /** Cadre les ombres sur la scène (boîte englobante) */
+  fitShadows(box, on = true) {
+    const sp = this.shadowPlane, d = this.sun;
+    d.castShadow = on;
+    if (!on || box.isEmpty()) { sp.visible = false; return; }
+    const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+    const R = Math.max(sz.length() * 0.75, 50);
+    d.target.position.copy(c);
+    d.position.copy(c).add(new THREE.Vector3(0.35, -0.5, 1).normalize().multiplyScalar(R * 2));
+    const cam = d.shadow.camera;
+    cam.left = -R; cam.right = R; cam.top = R; cam.bottom = -R; cam.near = 0.1; cam.far = R * 5;
+    cam.updateProjectionMatrix();
+    sp.visible = true;
+    sp.scale.set(R * 4, R * 4, 1);
+    sp.position.set(c.x, c.y, box.min.z - 0.05);
   }
 
   buildGrid(size, step) {

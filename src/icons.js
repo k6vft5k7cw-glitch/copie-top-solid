@@ -75,6 +75,11 @@ const P = {
   branch: 'M2 14h20 M2 20h20 M8 14V3 M14 14V3 M8 3h6',
   hopper: 'M3 4h18l-6 10v6H9v-6z M9 14h6',
   flat: 'M3 7h18v10H3z M9 7v10 M15 7v10',
+  align: 'M4 4h7v7H4z M13 13h7v7h-7z M11 7.5h5v5 M14 10l2 2.5 2-2.5',
+  explode: 'M9 9h6v6H9z M4 4l3 3 M20 4l-3 3 M4 20l3-3 M20 20l-3-3',
+  weld: 'M3 20h18 M6 20l6-12 6 12 M9 14h6 M12 4v2',
+  list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
+  calc: 'M5 3h14v18H5z M8 7h8 M8 11h2 M14 11h2 M8 15h2 M14 15h2 M8 18h2 M14 18h2',
   detach: 'M8 8h8v8H8z M3 3l4 4 M21 21l-4-4',
 };
 

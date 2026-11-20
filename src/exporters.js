@@ -277,61 +277,132 @@ export function layoutDrawing(bodies, viewNames, opts = {}) {
   return { views: placed, width: maxX, height: maxY };
 }
 
-export function drawingToDxf(layout, { hidden = true, dims = true, title = '' } = {}) {
-  const dxf = new DxfWriter();
-  const LV = dxf.layer('VISIBLE', 7), LH = dxf.layer('CACHE', 8), LT = dxf.layer('TEXTE', 3), LD = dxf.layer('COTES', 1);
-  for (const v of layout.views) {
-    for (const s of v.data.visible) dxf.line([s[0] + v.ox, s[1] + v.oy], [s[2] + v.ox, s[3] + v.oy], LV);
-    if (hidden) for (const s of v.data.hidden) dxf.line([s[0] + v.ox, s[1] + v.oy], [s[2] + v.ox, s[3] + v.oy], LH);
-    const b = v.data.bbox;
-    const th = Math.max(2.5, Math.min(10, layout.width / 80));
-    dxf.text([b.minX + v.ox, b.minY + v.oy - th * 2.2], th, v.name, LT);
-    if (dims && v.name !== 'Isométrique') {
-      const w = b.maxX - b.minX, h = b.maxY - b.minY, off = th * 1.5;
-      const y = b.maxY + v.oy + off;
-      dxf.line([b.minX + v.ox, y], [b.maxX + v.ox, y], LD);
-      dxf.text([b.minX + v.ox + w / 2 - th * 1.5, y + th * 0.4], th * 0.8, fmtDim(w), LD);
-      const x = b.maxX + v.ox + off;
-      dxf.line([x, b.minY + v.oy], [x, b.maxY + v.oy], LD);
-      dxf.text([x + th * 0.4, b.minY + v.oy + h / 2], th * 0.8, fmtDim(h), LD);
+export const PAPERS = { 'A4': [297, 210], 'A3': [420, 297], 'A2': [594, 420], 'A1': [841, 594], 'A0': [1189, 841] };
+const SCALES = [10, 5, 2, 1, 1 / 2, 1 / 5, 1 / 10, 1 / 20, 1 / 50, 1 / 100, 1 / 200, 1 / 500];
+const fmtDim = (v) => (Math.round(v * 100) / 100).toString().replace('.', ',');
+export const scaleLabel = (s) => (s >= 1 ? `${s}:1` : `1:${Math.round(1 / s)}`);
+
+/**
+ * Primitives de la planche (coordonnées papier en mm, Y vers le haut).
+ * opts : hidden, dims, title, paper ('A4'…'A0' ou 'Aucun'), fields {societe, auteur, matiere, indice, masse}, bom [{rep, qty, name, mat, mass}]
+ */
+export function drawingPrims(layout, opts = {}) {
+  const { hidden = true, dims = true, title = '', paper = 'A3', fields = {}, bom = null } = opts;
+  const prims = [];
+  const line = (a, b, layer) => prims.push({ t: 'line', a, b, layer });
+  const text = (p, h, txt, layer, anchor = 'start') => prims.push({ t: 'text', p, h, txt: String(txt ?? ''), layer, anchor });
+  const rect = (x0, y0, x1, y1, layer) => { line([x0, y0], [x1, y0], layer); line([x1, y0], [x1, y1], layer); line([x1, y1], [x0, y1], layer); line([x0, y1], [x0, y0], layer); };
+  let PW, PH, s, ox, oy, th;
+  const bomRows = bom && bom.length ? bom : null;
+  if (paper === 'Aucun' || !PAPERS[paper]) {
+    s = 1;
+    const m = Math.max(20, layout.width * 0.08);
+    th = Math.max(2.5, Math.min(10, layout.width / 80));
+    PW = layout.width + 2 * m; PH = layout.height + 2 * m + (title ? m : 0);
+    ox = m; oy = m + (title ? m : 0);
+    if (title) text([m, m * 0.5], th * 1.4, title, 'TEXTE');
+  } else {
+    [PW, PH] = PAPERS[paper];
+    th = paper === 'A4' ? 2.5 : 3.5;
+    const tbW = 180, tbH = 36, rowH = 6;
+    const bomH = bomRows ? (Math.min(bomRows.length, 30) + 1) * rowH : 0;
+    // zone utile : cadre moins le cartouche (+ nomenclature) en bas à droite
+    const fx0 = 20, fy0 = 10, fx1 = PW - 10, fy1 = PH - 10;
+    const availW = fx1 - fx0 - 20, availH = fy1 - fy0 - tbH - bomH - 25;
+    s = SCALES.find((k) => layout.width * k <= availW && layout.height * k <= Math.max(availH, (fy1 - fy0) * 0.45)) || SCALES[SCALES.length - 1];
+    ox = fx0 + 10 + (availW - layout.width * s) / 2;
+    oy = fy0 + tbH + bomH + 15 + Math.max(0, (availH - layout.height * s) / 2);
+    rect(fx0, fy0, fx1, fy1, 'CADRE');
+    rect(5, 5, PW - 5, PH - 5, 'CADRE');
+    // cartouche
+    const x0 = fx1 - tbW, y0 = fy0, y1 = fy0 + tbH;
+    rect(x0, y0, fx1, y1, 'CADRE');
+    line([x0, y0 + 24], [fx1, y0 + 24], 'CADRE');
+    line([x0, y0 + 12], [fx1, y0 + 12], 'CADRE');
+    for (const x of [45, 90, 135]) line([x0 + x, y0], [x0 + x, y0 + 12], 'CADRE');
+    line([x0 + 120, y0 + 12], [x0 + 120, y0 + 24], 'CADRE');
+    text([x0 + 3, y0 + 28], 6, title || 'Sans titre', 'TEXTE');
+    text([x0 + 3, y0 + 18.5], 2.5, 'Société', 'TEXTE'); text([x0 + 3, y0 + 14], 3.2, fields.societe || '', 'TEXTE');
+    text([x0 + 123, y0 + 18.5], 2.5, 'Matière', 'TEXTE'); text([x0 + 123, y0 + 14], 3.2, fields.matiere || '', 'TEXTE');
+    const cells = [['Dessiné par', fields.auteur || ''], ['Date', fields.date || ''], ['Échelle', scaleLabel(s)], ['Format / Indice', `${paper}  ind. ${fields.indice || 'A'}`]];
+    cells.forEach(([k, v], i) => { text([x0 + i * 45 + 2, y0 + 8.5], 2.3, k, 'TEXTE'); text([x0 + i * 45 + 2, y0 + 3], 3.2, v, 'TEXTE'); });
+    if (fields.masse) text([fx1 - 3, y0 + 28], 2.8, fields.masse, 'TEXTE', 'end');
+    // nomenclature au-dessus du cartouche
+    if (bomRows) {
+      const cols = [[0, 'Rep.'], [12, 'Qté'], [24, 'Désignation'], [118, 'Matière / norme'], [160, 'Masse']];
+      const rows = bomRows.slice(0, 30);
+      const by0 = y1;
+      rect(x0, by0, fx1, by0 + (rows.length + 1) * rowH, 'CADRE');
+      for (const [cx] of cols.slice(1)) line([x0 + cx, by0], [x0 + cx, by0 + (rows.length + 1) * rowH], 'CADRE');
+      // en-tête en bas (convention : la nomenclature se lit de bas en haut)
+      cols.forEach(([cx, lab]) => text([x0 + cx + 1.5, by0 + 1.8], 2.5, lab, 'TEXTE'));
+      rows.forEach((r, i) => {
+        const yy = by0 + (i + 1) * rowH;
+        line([x0, yy], [fx1, yy], 'CADRE');
+        const vals = [r.rep, r.qty, r.name, r.mat, r.mass];
+        cols.forEach(([cx], k) => text([x0 + cx + 1.5, yy + 1.8], 2.5, String(vals[k]).slice(0, k === 2 ? 42 : 20), 'TEXTE'));
+      });
+      if (bomRows.length > 30) text([x0, by0 + (rows.length + 1) * rowH + 2], 2.5, `… ${bomRows.length - 30} lignes de plus (voir export CSV)`, 'TEXTE');
     }
   }
-  if (title) dxf.text([0, -Math.max(10, layout.width / 30)], Math.max(3.5, layout.width / 60), title, LT);
+  const P = (v, x, y) => [ox + (x + v.ox) * s, oy + (y + v.oy) * s];
+  for (const v of layout.views) {
+    for (const q of v.data.visible) line(P(v, q[0], q[1]), P(v, q[2], q[3]), 'VISIBLE');
+    if (hidden) for (const q of v.data.hidden) line(P(v, q[0], q[1]), P(v, q[2], q[3]), 'CACHE');
+    const b = v.data.bbox;
+    const [lx, ly] = P(v, b.minX, b.minY);
+    text([lx, ly - th * 2.4], th, v.name.toUpperCase(), 'TEXTE');
+    if (dims && v.name !== 'Isométrique') {
+      const off = th * 2.2;
+      const [ax, ay] = P(v, b.minX, b.maxY), [bx] = P(v, b.maxX, b.maxY);
+      const y = ay + off;
+      line([ax, y], [bx, y], 'COTES'); line([ax, ay + 1], [ax, y + 1.5], 'COTES'); line([bx, ay + 1], [bx, y + 1.5], 'COTES');
+      line([ax, y], [ax + 2.5, y + 0.8], 'COTES'); line([ax, y], [ax + 2.5, y - 0.8], 'COTES'); line([bx, y], [bx - 2.5, y + 0.8], 'COTES'); line([bx, y], [bx - 2.5, y - 0.8], 'COTES');
+      text([(ax + bx) / 2, y + 0.8], th * 0.9, fmtDim(b.maxX - b.minX), 'COTES', 'middle');
+      const [cx, cy] = P(v, b.maxX, b.minY), [, dy] = P(v, b.maxX, b.maxY);
+      const x = cx + off;
+      line([x, cy], [x, dy], 'COTES'); line([cx + 1, cy], [x + 1.5, cy], 'COTES'); line([cx + 1, dy], [x + 1.5, dy], 'COTES');
+      line([x, cy], [x + 0.8, cy + 2.5], 'COTES'); line([x, cy], [x - 0.8, cy + 2.5], 'COTES'); line([x, dy], [x + 0.8, dy - 2.5], 'COTES'); line([x, dy], [x - 0.8, dy - 2.5], 'COTES');
+      text([x + 1.2, (cy + dy) / 2], th * 0.9, fmtDim(b.maxY - b.minY), 'COTES');
+    }
+  }
+  return { prims, W: PW, H: PH, scale: s, paper: PAPERS[paper] ? paper : null };
+}
+
+export function drawingToDxf(layout, opts = {}) {
+  const { prims } = drawingPrims(layout, opts);
+  const dxf = new DxfWriter();
+  const col = { VISIBLE: 7, CACHE: 8, COTES: 1, TEXTE: 3, CADRE: 5 };
+  for (const p of prims) {
+    const ly = dxf.layer(p.layer, col[p.layer] || 7);
+    if (p.t === 'line') dxf.line(p.a, p.b, ly);
+    else {
+      const w = p.txt.length * p.h * 0.6;
+      const x = p.anchor === 'middle' ? p.p[0] - w / 2 : p.anchor === 'end' ? p.p[0] - w : p.p[0];
+      dxf.text([x, p.p[1]], p.h, p.txt, ly);
+    }
+  }
   return dxf.toString();
 }
 
-const fmtDim = (v) => (Math.round(v * 100) / 100).toString().replace('.', ',');
-
-export function drawingToSvg(layout, { hidden = true, dims = true, title = '', forScreen = false } = {}) {
-  const m = Math.max(20, layout.width * 0.08);
-  const W = layout.width + 2 * m, H = layout.height + 2 * m + (title ? m : 0);
-  const sw = Math.max(0.25, layout.width / 900);
-  const th = Math.max(2.5, Math.min(10, layout.width / 80));
-  const y = (v) => H - m - v - (title ? m : 0); // SVG : axe Y vers le bas
-  const parts = [];
-  for (const v of layout.views) {
-    const vis = v.data.visible.map((s) => `M${(s[0] + v.ox + m).toFixed(3)} ${y(s[1] + v.oy).toFixed(3)}L${(s[2] + v.ox + m).toFixed(3)} ${y(s[3] + v.oy).toFixed(3)}`).join('');
-    parts.push(`<path d="${vis}" stroke="#111" stroke-width="${sw * 1.6}" fill="none" stroke-linecap="round"/>`);
-    if (hidden && v.data.hidden.length) {
-      const hd = v.data.hidden.map((s) => `M${(s[0] + v.ox + m).toFixed(3)} ${y(s[1] + v.oy).toFixed(3)}L${(s[2] + v.ox + m).toFixed(3)} ${y(s[3] + v.oy).toFixed(3)}`).join('');
-      parts.push(`<path d="${hd}" stroke="#777" stroke-width="${sw}" stroke-dasharray="${sw * 6} ${sw * 4}" fill="none"/>`);
-    }
-    const b = v.data.bbox;
-    parts.push(`<text x="${b.minX + v.ox + m}" y="${y(b.minY + v.oy) + th * 2.2}" font-size="${th}" font-family="Arial" fill="#1565c0">${v.name}</text>`);
-    if (dims && v.name !== 'Isométrique') {
-      const w = b.maxX - b.minX, h = b.maxY - b.minY, off = th * 1.6;
-      const yy = y(b.maxY + v.oy) - off, x0 = b.minX + v.ox + m, x1 = b.maxX + v.ox + m;
-      parts.push(`<g stroke="#c62828" stroke-width="${sw}" fill="#c62828" font-size="${th * 0.85}" font-family="Arial">`
-        + `<line x1="${x0}" y1="${yy}" x2="${x1}" y2="${yy}"/><line x1="${x0}" y1="${yy - off / 2}" x2="${x0}" y2="${yy + off / 2}"/><line x1="${x1}" y1="${yy - off / 2}" x2="${x1}" y2="${yy + off / 2}"/>`
-        + `<text x="${(x0 + x1) / 2}" y="${yy - th * 0.4}" text-anchor="middle" stroke="none">${fmtDim(w)}</text>`);
-      const xx = x1 + off, ya = y(b.minY + v.oy), yb = y(b.maxY + v.oy);
-      parts.push(`<line x1="${xx}" y1="${ya}" x2="${xx}" y2="${yb}"/><line x1="${xx - off / 2}" y1="${ya}" x2="${xx + off / 2}" y2="${ya}"/><line x1="${xx - off / 2}" y1="${yb}" x2="${xx + off / 2}" y2="${yb}"/>`
-        + `<text x="${xx + th * 0.5}" y="${(ya + yb) / 2}" stroke="none">${fmtDim(h)}</text></g>`);
-    }
+export function drawingToSvg(layout, opts = {}) {
+  const { prims, W, H, paper } = drawingPrims(layout, opts);
+  const base = paper ? 0.18 : Math.max(0.25, W / 900);
+  const sty = {
+    VISIBLE: `stroke="#111" stroke-width="${base * 2.6}" stroke-linecap="round"`,
+    CACHE: `stroke="#777" stroke-width="${base * 1.3}" stroke-dasharray="${base * 10} ${base * 6}"`,
+    COTES: `stroke="#c62828" stroke-width="${base * 1.1}"`,
+    CADRE: `stroke="#222" stroke-width="${base * 2.2}"`,
+  };
+  const groups = {};
+  const texts = [];
+  for (const p of prims) {
+    if (p.t === 'line') (groups[p.layer] = groups[p.layer] || []).push(`M${p.a[0].toFixed(3)} ${(H - p.a[1]).toFixed(3)}L${p.b[0].toFixed(3)} ${(H - p.b[1]).toFixed(3)}`);
+    else texts.push(`<text x="${p.p[0].toFixed(2)}" y="${(H - p.p[1]).toFixed(2)}" font-size="${p.h}" text-anchor="${p.anchor}" font-family="Arial" fill="${p.layer === 'COTES' ? '#c62828' : p.layer === 'TEXTE' && p.h < 3 ? '#555' : '#111'}">${esc(p.txt)}</text>`);
   }
-  if (title) parts.push(`<text x="${m}" y="${H - m * 0.5}" font-size="${th * 1.4}" font-family="Arial" fill="#111">${esc(title)}</text>`);
-  const size = forScreen ? 'width="100%" height="100%"' : `width="${W}mm" height="${H}mm"`;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" ${size} viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#fff"/>${parts.join('')}</svg>`;
+  const paths = Object.entries(groups).map(([k, d]) => `<path d="${d.join('')}" fill="none" ${sty[k] || sty.VISIBLE}/>`).join('');
+  const size = opts.forScreen ? 'width="100%" height="100%"' : `width="${W}mm" height="${H}mm"`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" ${size} viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#fff"/>${paths}${texts.join('')}</svg>`;
 }
 
 export function sketchToSvg(entities) {

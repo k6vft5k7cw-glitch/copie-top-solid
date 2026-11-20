@@ -35,6 +35,11 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 | **Mise en plan** | Vues de face, dessus, gauche, droite et isométrique, **lignes cachées en pointillés**, cotes d'encombrement, cartouche ; export **DXF**, SVG ou **PDF** (impression) |
 | **Import** | **STEP, IGES, BREP** (noyau OpenCascade intégré), STL, OBJ, glTF / GLB, PLY, 3MF, **DXF** (devient une esquisse prête à extruder) |
 | **Export** | **DXF** (esquisse exacte pour laser / plasma / CNC, plan 2D, maillage 3D), **STEP** (lu par SolidWorks, TopSolid, Fusion 360, FreeCAD, CATIA, Inventor…), **STL** (impression 3D), OBJ, GLB, PLY, SVG, PNG, projet `.fcad` |
+| **Prise en main** | **Palette de commandes `Ctrl+K`** (toutes les actions et tout le catalogue au clavier), **menu clic droit** contextuel, **cotes modifiables directement dans la vue 3D**, **guides pas à pas** avec « Faire pour moi » |
+| **Assemblage** | **Contact face contre face** en 2 clics, **vue éclatée** réglable, **isoler** une sélection, cordons de soudure comptés en nomenclature |
+| **Plan pro** | Formats **A4 à A0**, **échelle normalisée automatique**, **cartouche** (société, dessinateur, indice, date, matière, masse) mémorisé, **nomenclature** sur le plan |
+| **Atelier** | **Nomenclature + débits** (profilés, tôles) en **CSV Excel**, **tous les développés en un ZIP** classés par épaisseur, **calculateurs** : ajustements **ISO 286** (H7/g6…), pliage (facteur K), masses, perçage / taraudage / lamage / couples de serrage |
+| **Rendu** | Ombres, matériaux réalistes (inox, galvanisé, Corten, alu anodisé…), couleurs **RAL** ; congés sur blocs, chanfreins sur cylindres |
 | **Confort** | Annuler / rétablir illimité, calculs dans les champs (`120/2+5`), aides contextuelles en bas de l'écran, thème sombre, glisser-déposer de fichiers |
 
 ---
@@ -50,6 +55,10 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 | `0` `1` `3` `7` | Vues iso / face / droite / dessus | `Suppr` | Supprimer |
 | `Ctrl+Z` / `Ctrl+Y` | Annuler / rétablir | `Ctrl+D` | Dupliquer |
 | `Ctrl+S` / `Ctrl+O` | Enregistrer / ouvrir | `Échap` | Annuler l'action |
+| `Ctrl+K` | Rechercher une commande | Clic droit | Menu contextuel |
+| `A` | Contact face / face | `X` | Vue éclatée |
+| `Q` | Isoler | `W` | Soudure |
+| `C` | Calculateurs | | |
 
 En esquisse : `L` ligne, `R` rectangle, `Maj+R` rectangle centré, `C` cercle, `A` arc, `P` polygone, `O` oblong,
 chiffres + `Entrée` pour saisir une cote, `Maj` maintenue pour désactiver l'aimantation, `Entrée` pour terminer.

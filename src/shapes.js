@@ -1,6 +1,7 @@
 // Primitives géométriques de base (unités : mm, axe Z vers le haut)
 import * as THREE from 'three';
 import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 export const DEG = Math.PI / 180;
 
@@ -106,13 +107,20 @@ const P = (k, label, def, extra = {}) => ({ k, label, def, unit: 'mm', min: 0, .
 export const BASIC = {
   box: {
     label: 'Bloc', icon: 'box',
-    params: [P('l', 'Longueur (X)', 100), P('w', 'Largeur (Y)', 60), P('h', 'Hauteur (Z)', 20)],
-    build: (p) => new THREE.BoxGeometry(p.l, p.w, p.h).translate(0, 0, p.h / 2),
+    params: [P('l', 'Longueur (X)', 100), P('w', 'Largeur (Y)', 60), P('h', 'Hauteur (Z)', 20), P('r', 'Congé des arêtes', 0)],
+    build: (p) => {
+      const r = Math.min(p.r || 0, p.l / 2 - 0.01, p.w / 2 - 0.01, p.h / 2 - 0.01);
+      return (r > 0.01 ? new RoundedBoxGeometry(p.l, p.w, p.h, 4, r) : new THREE.BoxGeometry(p.l, p.w, p.h)).translate(0, 0, p.h / 2);
+    },
   },
   cylinder: {
     label: 'Cylindre', icon: 'cylinder',
-    params: [P('d', 'Diamètre', 40), P('h', 'Hauteur', 50)],
-    build: (p) => cyl(p.d / 2, p.h, 0, 64),
+    params: [P('d', 'Diamètre', 40), P('h', 'Hauteur', 50), P('c', 'Chanfrein des bords (45°)', 0)],
+    build: (p) => {
+      const R = p.d / 2, c = Math.min(p.c || 0, R - 0.01, p.h / 2 - 0.01);
+      if (c <= 0.01) return cyl(R, p.h, 0, 64);
+      return lathe([[0, 0], [R - c, 0], [R, c], [R, p.h - c], [R - c, p.h], [0, p.h]], 64);
+    },
   },
   tube: {
     label: 'Tube', icon: 'tube',
@@ -153,6 +161,13 @@ export const BASIC = {
     },
   },
 };
+
+/** Cordon de soudure (représentation) : gorge a, longueur L, le long de +X */
+export function buildWeld(p) {
+  const r = Math.max(0.3, (p.a * Math.SQRT2) / 2);
+  const L = Math.max(0.1, p.L);
+  return new THREE.CapsuleGeometry(r, L, 4, 12).rotateZ(-Math.PI / 2).translate(L / 2, 0, 0);
+}
 
 /** Perçage : outil d'enlèvement le long de -Z (posé sur une face) */
 export const HOLE_PRESETS = {

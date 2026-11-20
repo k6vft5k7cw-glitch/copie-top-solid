@@ -9,6 +9,7 @@ import { SketchEditor, sketchObject3D, findLoops, sketchShapes, ENTITY_FIELDS, E
 import * as EX from './exporters.js';
 import { importFile } from './importers.js';
 import { SHEET, SHEET_DEFAULTS, sheetFlat } from './sheet.js';
+import { HOLES, SHAFTS, COMMON_FITS, fit, deviation, bend, THREADS } from './calc.js';
 import { icon, TYPE_ICON, FAMILY_ICON } from './icons.js';
 
 // ------------------------------------------------------------------ utilitaires DOM
@@ -149,7 +150,7 @@ class App {
       ['redo', 'Rétablir (Ctrl+Y)', () => this.redo()],
     ];
     for (const [ic, t, fn] of quick) $('#quick').append(E('button', { title: t, html: icon(ic, 18), onclick: fn }));
-    const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['modify', 'Modifier'], ['tools', 'Mesurer'], ['export', 'Plan & Export'], ['help', 'Aide']];
+    const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['modify', 'Modifier'], ['tools', 'Outils'], ['export', 'Plan & Export'], ['help', 'Aide']];
     for (const [id, label] of tabs) $('#tabs').append(E('button', { 'data-tab': id, onclick: () => { this.tab = id; this.renderRibbon(); } }, label));
 
     const vb = $('#viewbar');
@@ -266,7 +267,17 @@ class App {
       ];
       case 'tools': return [
         { g: 'Mesure', b: [{ label: 'Distance', ic: 'measure', fn: () => this.startMeasure(), active: this.mode === 'measure', title: 'Cliquez 2 points (accroche aux sommets) – (D)' }] },
-        { g: 'Analyse', b: [{ label: 'Propriétés physiques', ic: 'layers', fn: () => this.physicalDialog(), title: 'Volume, masse, encombrement de tous les corps' }] },
+        { g: 'Assemblage', b: [
+          { label: 'Contact face / face', ic: 'align', fn: () => this.startAlign(), active: this.mode === 'align', title: 'Cliquez une face de la pièce à déplacer, puis la face d\'appui (A)' },
+          { label: 'Vue éclatée', ic: 'explode', fn: () => this.toggleExplode(), active: this.explode > 0, title: 'Écarte les pièces pour voir l\'assemblage (X)' },
+          { label: 'Isoler', ic: 'eye', fn: () => this.toggleIsolate(), active: !!this.isolate, title: 'N\'afficher que la sélection (Q)' },
+        ] },
+        { g: 'Soudure', b: [{ label: 'Cordon de soudure', ic: 'weld', fn: () => this.startWeld(), active: this.mode === 'weld', title: 'Cliquez le début puis la fin du cordon (accroche aux sommets) – (W)' }] },
+        { g: 'Analyse', b: [
+          { label: 'Propriétés physiques', ic: 'layers', fn: () => this.physicalDialog(), title: 'Volume, masse, encombrement de tous les corps' },
+          { label: 'Nomenclature', ic: 'list', fn: () => this.bomDialog(), title: 'Liste des pièces, quantités, masses, débits' },
+        ] },
+        { g: 'Atelier', b: [{ label: 'Calculateurs', ic: 'calc', fn: () => this.calcDialog(), primary: true, title: 'Ajustements ISO, pliage, masses, perçages / taraudages' }] },
       ];
       case 'export': return [
         { g: 'Mise en plan', b: [{ label: 'Plan 2D (DXF / PDF)', ic: 'drawing', fn: () => this.drawingDialog(), primary: true, title: 'Vues de face, dessus, côté, iso avec lignes cachées et cotes' }] },
@@ -282,6 +293,10 @@ class App {
           { label: 'PLY', ic: 'export', fn: () => this.export3D('ply') },
           { label: 'DXF 3D', ic: 'export', fn: () => this.export3D('dxf3d'), title: 'Maillage 3DFACE pour AutoCAD' },
         ] },
+        { g: 'Atelier', b: [
+          { label: 'Nomenclature (CSV)', ic: 'list', fn: () => this.exportBomCsv(), title: 'Nomenclature + débits (profilés, tôles) pour Excel' },
+          { label: 'Tous les développés (ZIP)', ic: 'flat', fn: () => this.exportAllFlats(), title: 'Un DXF par tôle, classés par épaisseur' },
+        ] },
         { g: 'Autres', b: [
           { label: 'Image PNG', ic: 'camera', fn: () => this.exportPNG() },
           { label: 'Tous les formats…', ic: 'export', fn: () => this.exportDialog() },
@@ -291,6 +306,8 @@ class App {
       case 'help': return [
         { g: 'Démarrer', b: [
           { label: 'Exemple', ic: 'play', fn: () => this.loadExample(), title: 'Charger un assemblage d\'exemple' },
+          { label: 'Pas à pas', ic: 'play', fn: () => this.tutorialsDialog(), primary: true, title: 'Guides : première pièce, tôle pliée, carré-rond, assemblage, plan' },
+          { label: 'Rechercher une commande', ic: 'search', fn: () => this.openPalette(), title: 'Ctrl+K' },
           { label: 'Raccourcis', ic: 'help', fn: () => this.helpDialog() },
         ] },
         { g: 'Affichage', b: [{ label: 'Thème clair / sombre', ic: 'sun', fn: () => this.toggleTheme() }] },
@@ -322,7 +339,10 @@ class App {
       if (!d) return;
       if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || d.axis) return;
       if (d.b === 0) this.onClick(e);
-      if (d.b === 2 && (this.mode === 'place' || this.mode === 'measure' || this.mode === 'pickface')) this.cancelMode();
+      if (d.b === 2) {
+        if (['place', 'measure', 'pickface', 'align', 'weld'].includes(this.mode)) this.cancelMode();
+        else if (this.mode === 'normal') this.contextMenu(e);
+      }
     });
     cv.addEventListener('pointermove', (e) => this.onMove(e));
     cv.addEventListener('dblclick', (e) => this.onDblClick(e));
@@ -354,6 +374,8 @@ class App {
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && e.key.toLowerCase() === 's') { e.preventDefault(); return this.saveProject(); }
     if (ctrl && e.key.toLowerCase() === 'o') { e.preventDefault(); return this.openFile('.fcad,.json'); }
+    if (ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); return this.openPalette(); }
+    this.closeMenu();
     if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
     if (!$('#modal').classList.contains('hidden')) { if (e.key === 'Escape') this.closeModal(); return; }
     if (ctrl && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); return this.undo(); }
@@ -373,6 +395,11 @@ class App {
       case 'b': case 'B': this.showPane('lib'); break;
       case 'i': case 'I': this.openFile('.step,.stp,.iges,.igs,.brep,.stl,.obj,.glb,.gltf,.ply,.3mf,.dxf'); break;
       case 'd': case 'D': this.startMeasure(); break;
+      case 'a': case 'A': this.startAlign(); break;
+      case 'w': case 'W': this.startWeld(); break;
+      case 'x': case 'X': this.toggleExplode(); break;
+      case 'q': case 'Q': this.toggleIsolate(); break;
+      case 'c': case 'C': this.calcDialog(); break;
       case 'e': case 'E': { const o = this.selObjs()[0]; if (o?.type === 'sketch') this.enterSketch(o); else if (o?.params?.sketch) this.enterSketch(this.model.get(o.params.sketch)); break; }
       case '0': this.setStdView('iso'); break;
       case '1': this.setStdView('front'); break;
@@ -410,6 +437,8 @@ class App {
     if (this.mode === 'sketch') return this.editor.onClick(e);
     if (this.mode === 'place') return this.placeClick(e);
     if (this.mode === 'measure') return this.measureClick(e);
+    if (this.mode === 'align') return this.alignClick(e);
+    if (this.mode === 'weld') return this.weldClick(e);
     if (this.mode === 'pickface') return this.pickFaceClick(e);
     const p = this.pickObject(e);
     if (!p) { if (!e.shiftKey && !e.ctrlKey) this.select([]); return; }
@@ -434,13 +463,15 @@ class App {
     this.lastMouse = { clientX: e.clientX, clientY: e.clientY };
     if (this.mode === 'sketch') return this.editor.onMove(e);
     if (this.mode === 'place') return this.placeMove(e);
-    if (this.mode === 'measure') return this.measureMove(e);
+    if (this.mode === 'measure' || this.mode === 'weld') return this.measureMove(e);
+    if (this.mode === 'align') { const h = this.surfaceHit(e); this.setCursorLabel(h ? (this.alignA ? 'Face d\'appui' : 'Face à plaquer') : ''); return; }
     const ray = this.viewer.rayFromEvent(e);
     const hit = new THREE.Vector3();
     if (ray.intersectPlane(new THREE.Plane(Z, 0), hit)) this.setCoords(`X ${fmt(hit.x, 1)}  Y ${fmt(hit.y, 1)}  Z 0`);
   }
 
   onFrame() {
+    this.positionHud();
     if (this.meas && this.meas.pts.length === 2) {
       const [a, b] = this.meas.pts;
       const s = this.viewer.toScreen(a.clone().add(b).multiplyScalar(0.5));
@@ -486,8 +517,27 @@ class App {
     const w = this.viewer.world;
     while (w.children.length) w.remove(w.children[0]);
     this.groups.clear();
-    for (const o of this.model.roots()) w.add(this.buildGroup(o));
+    for (const o of this.model.roots()) {
+      const g = this.buildGroup(o);
+      if (this.isolate && !this.isolate.includes(o.id) && o.type !== 'sketch') g.visible = false;
+      w.add(g);
+    }
+    if (this.explode > 0) {
+      w.updateMatrixWorld(true);
+      const all = new THREE.Box3();
+      const boxes = new Map();
+      for (const g of w.children) { if (!g.visible) continue; const b = new THREE.Box3().setFromObject(g, true); if (!b.isEmpty()) { boxes.set(g, b); all.union(b); } }
+      const C = all.getCenter(new THREE.Vector3()), R = all.getSize(new THREE.Vector3()).length() / 2 || 1;
+      for (const [g, b] of boxes) {
+        const d = b.getCenter(new THREE.Vector3()).sub(C);
+        if (d.length() < R * 0.02) d.set(0, 0, 1).multiplyScalar(R * 0.3);
+        g.position.add(d.multiplyScalar(this.explode));
+      }
+    }
+    w.traverse((c) => { if (c.isMesh && c.userData.solid) { c.castShadow = true; c.receiveShadow = true; } });
+    this.viewer.fitShadows(this.sceneBox(), this.settings.shadows !== false && !this.settings.wire);
     this.attachGizmo();
+    this.renderHud();
   }
 
   buildGroup(o) {
@@ -513,8 +563,9 @@ class App {
             g.add(m, new THREE.LineSegments(this.edgesFor(f), new THREE.LineBasicMaterial({ color: col })));
           }
         } else {
+          const M = MATERIALS[o.material] || {};
           const mat = new THREE.MeshStandardMaterial({
-            color: this.model.color(o), metalness: 0.3, roughness: 0.5, side: THREE.DoubleSide, wireframe: this.settings.wire,
+            color: this.model.color(o), metalness: o.color ? 0.2 : (M.metal ?? 0.3), roughness: o.color ? 0.5 : (M.rough ?? 0.5), side: THREE.DoubleSide, wireframe: this.settings.wire,
             polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
             emissive: sel ? 0x1e64c8 : 0x000000, emissiveIntensity: sel ? 0.4 : 0,
           });
@@ -553,7 +604,7 @@ class App {
   attachGizmo() {
     const tc = this.viewer.tc;
     const o = this.selObjs()[0];
-    if (this.mode !== 'normal' || this.selection.length !== 1 || !o || !o.visible) { tc.detach(); return; }
+    if (this.mode !== 'normal' || this.selection.length !== 1 || !o || !o.visible || this.explode > 0) { tc.detach(); return; }
     const g = this.groups.get(o.id);
     if (!g) { tc.detach(); return; }
     tc.attach(g);
@@ -714,6 +765,10 @@ class App {
         } else ps.append(this.numField(d.label, o.params[d.k], (v) => set(() => { o.params[d.k] = Math.max(d.min ?? 0.01, d.step === 1 ? Math.round(v) : v); }), d.unit, 'p.' + d.k));
       }
       ps.append(E('button', { class: 'btn big primary', style: 'margin-top:6px', onclick: () => this.flatDialog(o), html: icon('flat', 16) + 'Développé à plat (DXF)' }));
+    } else if (o.type === 'weld') {
+      ps.append(this.numField('Gorge a', o.params.a, (v) => set(() => { o.params.a = Math.max(1, v); this.weldA = o.params.a; }), 'mm', 'p.a'));
+      ps.append(this.numField('Longueur', o.params.L, (v) => set(() => { o.params.L = Math.max(0.5, v); }), 'mm', 'p.L'));
+      ps.append(E('div', { class: 'note' }, 'Cordon d\'angle représenté de façon simplifiée. Il est compté dans la nomenclature (longueur totale par gorge).'));
     } else if (o.type === 'extrude') {
       ps.append(this.numField('Hauteur', o.params.h, (v) => set(() => { o.params.h = Math.max(0.01, v); }), 'mm', 'p.h'));
       ps.append(this.selField('Sens', o.params.dir, ['Normale', 'Inverse', 'Symétrique'], (v) => set(() => { o.params.dir = v; }), 'p.dir'));
@@ -989,7 +1044,8 @@ class App {
   // ================================================================ modes (placement, mesure, choix de face)
   cancelMode() {
     if (this.mode === 'place' && this.place) { this.viewer.overlay.remove(this.place.ghost); this.place = null; }
-    if (this.mode === 'measure') this.clearMeasure();
+    if (this.mode === 'measure' || this.mode === 'weld') this.clearMeasure();
+    if (this.mode === 'align') this.alignA = null;
     if (this.mode === 'sketch') return this.exitSketch();
     this.mode = 'normal';
     $('#cursorLabel').classList.add('hidden');
@@ -1577,6 +1633,517 @@ class App {
     this.refresh();
   }
 
+  // ================================================================ menu contextuel (clic droit)
+  contextMenu(e) {
+    this.closeMenu();
+    const p = this.pickObject(e);
+    const o = p && this.model.get(p.id);
+    if (o && !this.selection.includes(o.id)) this.select([o.id]);
+    const items = [];
+    const it = (label, ic, fn, cls = '') => items.push({ label, ic, fn, cls });
+    const sep = () => items.push(null);
+    if (o) {
+      const solid = this.model.isSolid(o) && !o.role;
+      if (solid) {
+        it('Esquisser sur cette face', 'sketch', () => this.pickFaceClick(e));
+        it('Percer ici…', 'hole', () => this.holeDialog());
+        it('Plaquer contre une autre face', 'align', () => { this.startAlign(); this.alignClick(e); });
+      }
+      if (o.type === 'sheet') it('Développé à plat (DXF)', 'flat', () => this.flatDialog(o));
+      if (o.type === 'sketch') { it('Modifier l\'esquisse', 'sketch', () => this.enterSketch(o)); it('Extruder', 'extrude', () => this.fromSketch('extrude', o)); }
+      if (o.params?.sketch && this.model.get(o.params.sketch)) it('Modifier l\'esquisse', 'sketch', () => this.enterSketch(this.model.get(o.params.sketch)));
+      sep();
+      it('Dupliquer', 'duplicate', () => this.duplicate());
+      it('Répétition linéaire…', 'patlin', () => this.patternDialog('lin'));
+      it('Répétition circulaire…', 'patcirc', () => this.patternDialog('circ'));
+      it(this.isolate ? 'Tout réafficher' : 'Isoler', 'eye', () => this.toggleIsolate());
+      it('Masquer', 'eyeoff', () => { o.visible = false; this.commit(); this.refresh(); });
+      if (solid) it('Poser au sol', 'ground', () => this.dropToGround());
+      sep();
+      it('Supprimer', 'trash', () => this.deleteSel(), 'danger');
+    } else {
+      it('Nouvelle esquisse', 'sketch', () => this.newSketchDialog());
+      it('Poser un bloc', 'box', () => this.placeBasic('box'));
+      it('Catalogue de composants', 'catalog', () => this.showPane('lib'));
+      it('Importer un fichier…', 'import', () => this.openFile('.step,.stp,.iges,.igs,.brep,.stl,.obj,.glb,.gltf,.ply,.3mf,.dxf'));
+      sep();
+      it('Tout afficher', 'fit', () => this.fitView());
+      it('Vue isométrique', 'iso', () => this.setStdView('iso'));
+      if (this.isolate) it('Tout réafficher', 'eye', () => this.toggleIsolate());
+      it(this.explode > 0 ? 'Rassembler (fin de vue éclatée)' : 'Vue éclatée', 'explode', () => this.toggleExplode());
+      it('Rechercher une commande…  Ctrl+K', 'search', () => this.openPalette());
+    }
+    const m = E('div', { class: 'ctxmenu' });
+    for (const x of items) {
+      if (!x) { m.append(E('hr')); continue; }
+      m.append(E('button', { class: x.cls, html: icon(x.ic, 16) + `<span>${esc(x.label)}</span>`, onclick: () => { this.closeMenu(); x.fn(); } }));
+    }
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+    m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+    this.menu = m;
+    setTimeout(() => window.addEventListener('pointerdown', this._closer = (ev) => { if (!m.contains(ev.target)) this.closeMenu(); }), 0);
+  }
+
+  closeMenu() {
+    if (this.menu) { this.menu.remove(); this.menu = null; window.removeEventListener('pointerdown', this._closer); }
+  }
+
+  // ================================================================ palette de commandes (Ctrl+K)
+  commandList() {
+    const cmds = [];
+    const saveTab = this.tab, saveMode = this.mode;
+    const tabs = { create: 'Créer', sheet: 'Chaudronnerie', modify: 'Modifier', tools: 'Outils', export: 'Plan & Export', help: 'Aide' };
+    if (this.mode === 'normal') {
+      for (const [t, tl] of Object.entries(tabs)) {
+        this.tab = t;
+        for (const g of this.ribbonDef()) for (const b of g.b) cmds.push({ label: b.label, group: `${tl} › ${g.g}`, ic: b.ic, fn: b.fn, kw: b.title || '' });
+      }
+      this.tab = saveTab;
+    } else {
+      for (const g of this.ribbonDef()) for (const b of g.b) cmds.push({ label: b.label, group: `Esquisse › ${g.g}`, ic: b.ic, fn: b.fn, kw: b.title || '' });
+    }
+    this.mode = saveMode;
+    for (const [v, l] of [['iso', 'Vue isométrique'], ['front', 'Vue de face'], ['top', 'Vue de dessus'], ['right', 'Vue de droite']]) cmds.push({ label: l, group: 'Affichage', ic: v, fn: () => this.setStdView(v) });
+    if (this.selection.length) for (const m of Object.keys(MATERIALS)) cmds.push({ label: 'Matériau : ' + m, group: 'Sélection', ic: 'layers', fn: () => { for (const o of this.selObjs()) { o.material = m; o.color = null; } this.commit(); this.refresh(); } });
+    for (const f of LIBRARY) for (const sz of Object.keys(f.sizes)) cmds.push({ label: `${f.name} ${sz}`, group: `Catalogue › ${f.std}`, ic: FAMILY_ICON(f), fn: () => this.placePart(f, sz), kw: f.cat });
+    return cmds;
+  }
+
+  openPalette() {
+    if (this.palette) return;
+    this.closeMenu();
+    const cmds = this.commandList();
+    const norm = (t) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const idx = cmds.map((c) => norm(`${c.label} ${c.group} ${c.kw}`));
+    const input = E('input', { type: 'text', placeholder: 'Que voulez-vous faire ? (ex. : coude, bride DN100, percer, développé, M8…)' });
+    const list = E('div', { class: 'pal-list' });
+    const wrap = E('div', { id: 'palette' }, E('div', { class: 'pal-box' }, input, list));
+    let shown = [], sel = 0;
+    const close = () => { wrap.remove(); this.palette = null; };
+    const run = (c) => { close(); c.fn(); };
+    const render = () => {
+      const terms = norm(input.value).split(/\s+/).filter(Boolean);
+      shown = [];
+      for (let i = 0; i < cmds.length && shown.length < 14; i++) if (terms.every((t) => idx[i].includes(t))) shown.push(cmds[i]);
+      if (!terms.length) shown = shown.filter((c) => !c.group.startsWith('Catalogue')).slice(0, 14);
+      sel = Math.min(sel, Math.max(0, shown.length - 1));
+      list.innerHTML = '';
+      shown.forEach((c, i) => list.append(E('button', { class: i === sel ? 'on' : '', onclick: () => run(c), onmousemove: () => { if (sel !== i) { sel = i; render(); } }, html: icon(c.ic, 18) + `<span>${esc(c.label)}</span><small>${esc(c.group)}</small>` })));
+      if (!shown.length) list.append(E('div', { class: 'pal-empty' }, 'Aucune commande trouvée'));
+    };
+    input.addEventListener('input', () => { sel = 0; render(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { sel = Math.min(shown.length - 1, sel + 1); render(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = Math.max(0, sel - 1); render(); e.preventDefault(); }
+      else if (e.key === 'Enter' && shown[sel]) run(shown[sel]);
+      else if (e.key === 'Escape') close();
+      e.stopPropagation();
+    });
+    wrap.addEventListener('pointerdown', (e) => { if (e.target === wrap) close(); });
+    document.body.append(wrap);
+    this.palette = wrap;
+    render();
+    input.focus();
+  }
+
+  // ================================================================ cotes modifiables dans la vue 3D
+  hudParams(o) {
+    const num = (k, label, unit = 'mm') => ({ k, label, unit });
+    if (BASIC[o.type]) return BASIC[o.type].params.slice(0, 4).map((d) => num(d.k, d.label.replace(/\s*\(.*\)/, ''), d.unit));
+    if (o.type === 'part') {
+      const fam = familyById(o.params.family);
+      if (!fam) return [];
+      return [{ k: 'size', label: 'Taille', options: Object.keys(fam.sizes) }, ...fam.extra.filter((x) => !(x.options && typeof x.options[0] === 'string')).slice(0, 3).map((x) => ({ k: x.k, label: x.label, unit: x.unit, options: x.options }))];
+    }
+    if (o.type === 'sheet') return SHEET[o.params.kind].params.filter((d) => !d.options).slice(0, 4).map((d) => (d.text ? { k: d.k, label: 'Profil', text: true } : num(d.k, d.label.replace(/\s*\(.*\)/, ''), d.unit)));
+    if (o.type === 'extrude') return [num('h', 'Hauteur')];
+    if (o.type === 'revolve') return [num('angle', 'Angle', '°')];
+    if (o.type === 'hole') return [num('d', 'Ø'), ...(o.params.through ? [] : [num('depth', 'Profondeur')])];
+    if (o.type === 'weld') return [num('a', 'Gorge a'), num('L', 'Longueur')];
+    return [];
+  }
+
+  renderHud() {
+    let hud = $('#hud');
+    if (!hud) { hud = E('div', { id: 'hud' }); $('#viewport').append(hud); }
+    const o = this.selObjs()[0];
+    this.hudObj = null;
+    hud.innerHTML = '';
+    if (this.mode !== 'normal' || this.selection.length !== 1 || !o || o.type === 'sketch' || this.explode > 0 || !o.visible) { hud.classList.add('hidden'); return; }
+    const fields = this.hudParams(o);
+    hud.classList.remove('hidden');
+    hud.append(E('div', { class: 'hud-t' }, this.model.displayName(o)));
+    const row = E('div', { class: 'hud-row' });
+    for (const f of fields) {
+      let inp;
+      const apply = (v) => { o.params[f.k] = v; if (o.type === 'part') o.name = ''; this.commit(); setTimeout(() => this.refresh(), 0); };
+      if (f.options && typeof f.options[0] === 'string') {
+        inp = E('select', { 'data-k': 'hud.' + f.k, onchange: () => apply(inp.value) }, ...f.options.map((x) => E('option', { value: x, selected: x === o.params[f.k] }, x)));
+      } else if (f.text) {
+        inp = E('input', { type: 'text', value: o.params[f.k], 'data-k': 'hud.' + f.k, style: 'width:120px', onchange: () => apply(inp.value) });
+      } else {
+        inp = E('input', { type: 'text', inputmode: 'decimal', value: fmtIn(o.params[f.k] ?? 0), 'data-k': 'hud.' + f.k });
+        inp.addEventListener('change', () => { const v = evalNum(inp.value); if (v == null || v < 0) { inp.value = fmtIn(o.params[f.k]); return; } apply(v); });
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const v = Math.max(0, (evalNum(inp.value) ?? 0) + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)); inp.value = fmtIn(v); apply(v); } });
+      }
+      row.append(E('label', {}, E('span', {}, f.label + (f.unit ? ` (${f.unit})` : '')), inp));
+    }
+    if (fields.length) hud.append(row);
+    try {
+      const f = this.model.finalGeometry(o);
+      const g = f.geom.clone().applyMatrix4(this.model.worldMatrix(o));
+      g.computeBoundingBox();
+      const sz = g.boundingBox.getSize(new THREE.Vector3());
+      hud.append(E('div', { class: 'hud-dim' }, `↔ ${fmt(sz.x, 1)}   ↕ ${fmt(sz.y, 1)}   ⇵ ${fmt(sz.z, 1)} mm`));
+      this.hudAnchor = new THREE.Vector3((g.boundingBox.min.x + g.boundingBox.max.x) / 2, (g.boundingBox.min.y + g.boundingBox.max.y) / 2, g.boundingBox.max.z);
+    } catch { this.hudAnchor = new THREE.Vector3(...o.pos); }
+    this.hudObj = o;
+    this.positionHud();
+  }
+
+  positionHud() {
+    const hud = $('#hud');
+    if (!hud || !this.hudObj || hud.classList.contains('hidden')) return;
+    if (this.viewer.tc.dragging) { hud.style.opacity = '0.25'; } else hud.style.opacity = '';
+    const s = this.viewer.toScreen(this.hudAnchor);
+    const r = this.viewer.container.getBoundingClientRect();
+    let x = s.x - r.left, y = s.y - r.top - 70;
+    const w = hud.offsetWidth, h = hud.offsetHeight;
+    x = Math.max(w / 2 + 8, Math.min(r.width - w / 2 - 60, x));
+    y = Math.max(h + 8, Math.min(r.height - 8, y));
+    hud.style.left = x + 'px';
+    hud.style.top = y + 'px';
+  }
+
+  // ================================================================ assemblage : contact face / face
+  startAlign() {
+    if (this.mode === 'sketch') this.exitSketch();
+    if (this.mode !== 'normal') this.cancelMode();
+    if (!this.model.objects.some((o) => this.model.isSolid(o) && !o.role)) return this.toast('Il faut au moins deux pièces', true);
+    this.mode = 'align';
+    this.alignA = null;
+    this.viewer.tc.detach();
+    this.updateWelcome();
+    this.setHint('🧲 1/2 : cliquez la face de la pièce à déplacer — Échap pour annuler');
+    this.renderRibbon();
+  }
+
+  alignClick(e) {
+    const h = this.surfaceHit(e);
+    if (!h) return this.toast('Cliquez sur une face', true);
+    if (!this.alignA) {
+      this.alignA = h;
+      this.setHint('🧲 2/2 : cliquez la face d\'appui (sur une autre pièce)');
+      return;
+    }
+    const A = this.alignA;
+    if (h.id === A.id) return this.toast('Choisissez une face d\'une autre pièce', true);
+    const o = this.model.get(A.id);
+    const q = new THREE.Quaternion().setFromUnitVectors(A.normal, h.normal.clone().negate());
+    const M = new THREE.Matrix4().makeTranslation(h.point.x, h.point.y, h.point.z)
+      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
+      .multiply(new THREE.Matrix4().makeTranslation(-A.point.x, -A.point.y, -A.point.z))
+      .multiply(this.model.worldMatrix(o));
+    this.model.setWorldMatrix(o, M);
+    this.alignA = null;
+    this.mode = 'normal';
+    $('#cursorLabel').classList.add('hidden');
+    this.commit();
+    this.selection = [o.id];
+    this.refresh();
+    this.toast('Pièce plaquée face contre face — ajustez sa position avec les flèches');
+  }
+
+  toggleExplode() {
+    if (this.explode > 0) { this.explode = 0; this.refresh(); return; }
+    const panel = E('div', { id: 'explodebar' }, E('span', {}, 'Vue éclatée'),
+      E('input', { type: 'range', min: 0, max: 150, value: 60, oninput: (ev) => { this.explode = ev.target.value / 100; this.rebuildScene(); } }),
+      E('button', { class: 'btn', onclick: () => { this.explode = 0; panel.remove(); this.refresh(); } }, 'Fermer'));
+    $('#explodebar')?.remove();
+    $('#viewport').append(panel);
+    this.explode = 0.6;
+    this.refresh();
+    const obs = setInterval(() => { if (!this.explode) { panel.remove(); clearInterval(obs); } }, 400);
+  }
+
+  toggleIsolate() {
+    if (this.isolate) this.isolate = null;
+    else {
+      const ids = this.selObjs().filter((o) => o.parent == null).map((o) => o.id);
+      if (!ids.length) return this.toast('Sélectionnez les pièces à isoler', true);
+      this.isolate = ids;
+      this.toast('Pièces isolées — Q ou clic droit pour tout réafficher');
+    }
+    this.refresh();
+  }
+
+  // ================================================================ soudure
+  startWeld() {
+    if (this.mode === 'sketch') this.exitSketch();
+    if (this.mode !== 'normal') this.cancelMode();
+    this.mode = 'weld';
+    this.meas = { pts: [], group: new THREE.Group() };
+    this.viewer.overlay.add(this.meas.group);
+    this.viewer.tc.detach();
+    this.updateWelcome();
+    this.setHint(`🔥 Cordon a=${this.weldA || 4} : cliquez le début puis la fin (accroche aux sommets) — Échap pour terminer`);
+    this.renderRibbon();
+  }
+
+  weldClick(e) {
+    const r = this.measurePoint(e);
+    if (!r) return;
+    this.meas.pts.push(r.p);
+    const g = this.meas.group;
+    const sz = this.viewer.worldPerPixel(r.p) * 5;
+    const s = new THREE.Mesh(new THREE.SphereGeometry(sz, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff6d00, depthTest: false }));
+    s.position.copy(r.p); s.renderOrder = 10; g.add(s);
+    if (this.meas.pts.length < 2) return;
+    const [a, b] = this.meas.pts;
+    const L = a.distanceTo(b);
+    this.meas.pts = [];
+    while (g.children.length) g.remove(g.children[0]);
+    if (L < 0.5) return;
+    const A = this.weldA || 4;
+    const o = this.model.add({ type: 'weld', name: '', params: { a: A, L: Math.round(L * 100) / 100 }, material: 'Acier' });
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), b.clone().sub(a).normalize());
+    this.model.setWorldMatrix(o, new THREE.Matrix4().compose(a, q, new THREE.Vector3(1, 1, 1)));
+    this.commit();
+    this.selection = [o.id];
+    this.rebuildScene();
+    this.viewer.tc.detach();
+    this.renderTree();
+    this.renderProps();
+    this.toast(`Cordon a${A} de ${fmt(L, 1)} mm ajouté — continuez ou Échap`);
+  }
+
+  // ================================================================ nomenclature
+  bom() {
+    const rows = new Map();
+    for (const o of this.model.objects) {
+      if (!this.model.isSolid(o) || o.role) continue;
+      let name = this.model.displayName(o), mat = o.material, key, L = 0;
+      if (o.type === 'part') { const fam = familyById(o.params.family); mat = `${fam?.std || ''} – ${o.material}`; }
+      if (o.type === 'sheet') mat = `Tôle ép. ${o.params.e} – ${o.material}`;
+      if (o.type === 'weld') { name = `Cordon de soudure a${o.params.a}`; mat = 'Soudure'; L = o.params.L; }
+      key = name + '|' + mat;
+      let mass = 0;
+      try { mass = (Model.volume(this.model.finalGeometry(o).geom) / 1000) * (MATERIALS[o.material]?.density || 7.85); } catch { /* rien */ }
+      const r = rows.get(key) || { name, mat, qty: 0, mass, L: 0, objs: [] };
+      r.qty++; r.L += L; r.objs.push(o);
+      rows.set(key, r);
+    }
+    return [...rows.values()].map((r, i) => ({
+      rep: i + 1, qty: r.qty, name: r.L ? `${r.name} (Σ ${fmt(r.L, 0)} mm)` : r.name, mat: r.mat,
+      unit: r.mass, total: r.mass * r.qty, mass: r.mass >= 1000 ? `${fmt(r.mass / 1000, 2)} kg` : `${fmt(r.mass, 0)} g`, objs: r.objs,
+    }));
+  }
+
+  cutList() {
+    const prof = new Map(), sheets = new Map();
+    for (const o of this.model.objects) {
+      if (o.role) continue;
+      if (o.type === 'part' && o.params.L) {
+        const fam = familyById(o.params.family);
+        if (!fam || !/Profilés|Tuyauterie/.test(fam.cat)) continue;
+        const k = `${fam.name} ${o.params.size}|${o.params.L}`;
+        const r = prof.get(k) || { name: `${fam.name} ${o.params.size}`, L: o.params.L, qty: 0, mat: o.material };
+        r.qty++; prof.set(k, r);
+      }
+      if (o.type === 'sheet') {
+        try {
+          const f = sheetFlat(o.params);
+          let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+          for (const e of f.entities) if (!e.construction) for (const q of entityPts(e)) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); }
+          const k = this.model.displayName(o) + '|' + o.params.e;
+          const r = sheets.get(k) || { name: this.model.displayName(o), e: o.params.e, W: c - a, H: d - b, area: sketchShapesArea(f.entities), qty: 0, mat: o.material };
+          r.qty++; sheets.set(k, r);
+        } catch { /* développé impossible */ }
+      }
+    }
+    return { prof: [...prof.values()], sheets: [...sheets.values()] };
+  }
+
+  bomDialog() {
+    const rows = this.bom();
+    if (!rows.length) return this.toast('Aucune pièce dans le projet', true);
+    const { prof, sheets } = this.cutList();
+    const total = rows.reduce((a, r) => a + r.total, 0);
+    const tr = (cells, th = false) => `<tr>${cells.map((c, i) => `<${th ? 'th' : 'td'} style="${i === 0 || i === 1 || /\d/.test(String(c)) && i > 3 ? 'text-align:right' : ''}">${esc(c)}</${th ? 'th' : 'td'}>`).join('')}</tr>`;
+    let html = `<h2>${icon('list', 22)}Nomenclature</h2><table class="tbl">${tr(['Rep.', 'Qté', 'Désignation', 'Matière / norme', 'Masse unit.', 'Masse totale'], true)}${rows.map((r) => tr([r.rep, r.qty, r.name, r.mat, r.mass, r.total >= 1000 ? fmt(r.total / 1000, 2) + ' kg' : fmt(r.total, 0) + ' g'])).join('')}</table><p><b>Masse totale : ${fmt(total / 1000, 2)} kg</b></p>`;
+    if (prof.length) html += `<h3>Débit des profilés et tubes</h3><table class="tbl">${tr(['Désignation', 'Longueur', 'Qté', 'Longueur totale'], true)}${prof.map((r) => tr([r.name, r.L + ' mm', r.qty, fmt((r.L * r.qty) / 1000, 2) + ' m'])).join('')}</table>`;
+    if (sheets.length) html += `<h3>Débit des tôles (flans développés)</h3><table class="tbl">${tr(['Pièce', 'Épaisseur', 'Flan', 'Qté', 'Surface totale'], true)}${sheets.map((r) => tr([r.name, r.e + ' mm', `${fmt(r.W, 0)} × ${fmt(r.H, 0)}`, r.qty, fmt((r.area * r.qty) / 1e6, 3) + ' m²'])).join('')}</table>`;
+    const box = this.modal(html);
+    box.append(E('div', { class: 'actions' }, E('button', { class: 'btn primary', onclick: () => this.exportBomCsv(), html: icon('export', 16) + 'Exporter CSV (Excel)' }), E('button', { class: 'btn', onclick: () => this.closeModal() }, 'Fermer')));
+  }
+
+  exportBomCsv() {
+    const rows = this.bom();
+    if (!rows.length) return this.toast('Aucune pièce dans le projet', true);
+    const { prof, sheets } = this.cutList();
+    const c = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const n = (v) => String(Math.round(v * 1000) / 1000).replace('.', ',');
+    const lines = [`${c('Nomenclature – ' + this.docName)}`, '', ['Rep', 'Qté', 'Désignation', 'Matière / norme', 'Masse unitaire (kg)', 'Masse totale (kg)'].map(c).join(';')];
+    for (const r of rows) lines.push([r.rep, r.qty, c(r.name), c(r.mat), n(r.unit / 1000), n(r.total / 1000)].join(';'));
+    if (prof.length) { lines.push('', c('DÉBIT PROFILÉS / TUBES'), ['Désignation', 'Longueur (mm)', 'Qté', 'Matière'].map(c).join(';')); for (const r of prof) lines.push([c(r.name), n(r.L), r.qty, c(r.mat)].join(';')); }
+    if (sheets.length) { lines.push('', c('DÉBIT TÔLES'), ['Pièce', 'Épaisseur (mm)', 'Flan L (mm)', 'Flan l (mm)', 'Surface unitaire (m²)', 'Qté', 'Matière'].map(c).join(';')); for (const r of sheets) lines.push([c(r.name), n(r.e), n(r.W), n(r.H), n(r.area / 1e6), r.qty, c(r.mat)].join(';')); }
+    download('﻿' + lines.join('\r\n'), safeName(this.docName) + '_nomenclature.csv', 'text/csv');
+    this.toast('Nomenclature exportée (s\'ouvre dans Excel / LibreOffice)');
+  }
+
+  async exportAllFlats() {
+    const list = this.model.objects.filter((o) => o.type === 'sheet' && !o.role);
+    if (!list.length) return this.toast('Aucune pièce de chaudronnerie / tôlerie dans le projet', true);
+    const { zipSync, strToU8 } = await import('three/addons/libs/fflate.module.js');
+    const files = {};
+    let ok = 0;
+    list.forEach((o, i) => {
+      try {
+        const f = sheetFlat(o.params);
+        const dxf = new EX.DxfWriter();
+        EX.sketchToDxf(dxf, f.entities);
+        for (const t of f.texts || []) dxf.text(t.p, t.h, t.txt, dxf.layer(t.layer || 'TEXTE', 3));
+        files[`ep${String(o.params.e).replace('.', ',')}mm/${String(i + 1).padStart(2, '0')}_${safeName(this.model.displayName(o))}_${o.material.split(' ')[0]}.dxf`] = strToU8(dxf.toString());
+        ok++;
+      } catch (e) { this.toast(`${this.model.displayName(o)} : ${e.message}`, true); }
+    });
+    download(new Blob([zipSync(files)]), safeName(this.docName) + '_developpes.zip', 'application/zip');
+    this.toast(`${ok} développé(s) exporté(s), classés par épaisseur`);
+  }
+
+  // ================================================================ calculateurs d'atelier
+  calcDialog(tab = 'fit') {
+    const F = (l, i, u = '') => E('div', { class: 'field' }, E('label', {}, l), i, E('span', { class: 'unit' }, u));
+    const num = (v) => E('input', { type: 'text', inputmode: 'decimal', value: fmtIn(v) });
+    const out = E('div', { class: 'calc-out' });
+    const body = E('div', {});
+    const tabs = [['fit', 'Ajustements ISO'], ['bend', 'Pliage'], ['mass', 'Masse'], ['thread', 'Perçage / taraudage']];
+    const head = E('div', { class: 'calc-tabs' }, ...tabs.map(([k, l]) => E('button', { class: k === tab ? 'on' : '', onclick: () => this.calcDialog(k) }, l)));
+    const sel = (opts, v) => E('select', {}, ...opts.map((o) => E('option', { value: o, selected: o === v }, o)));
+    const um = (v) => (Math.abs(v) < 1e-9 ? '0' : (v > 0 ? '+' : '') + fmt(v, 1)) + ' µm';
+    if (tab === 'fit') {
+      const D = num(25), H = sel(HOLES, 'H7'), S = sel(SHAFTS, 'g6');
+      const calc = () => {
+        const d = evalNum(D.value);
+        const r = d && fit(d, H.value, S.value);
+        if (!r) { out.innerHTML = '<div class="errbox">Diamètre hors plage (1 à 500 mm) ou combinaison non disponible.</div>'; return; }
+        const mm = (v) => fmt(d + v / 1000, 3);
+        out.innerHTML = `<table class="tbl"><tr><th></th><th>Écart sup.</th><th>Écart inf.</th><th>Maxi</th><th>Mini</th></tr>
+          <tr><td>Alésage Ø${fmt(d)} ${H.value}</td><td>${um(r.H.up)}</td><td>${um(r.H.low)}</td><td>${mm(r.H.up)}</td><td>${mm(r.H.low)}</td></tr>
+          <tr><td>Arbre Ø${fmt(d)} ${S.value}</td><td>${um(r.S.up)}</td><td>${um(r.S.low)}</td><td>${mm(r.S.up)}</td><td>${mm(r.S.low)}</td></tr></table>
+          <p><b>${r.type}</b> — ${r.jmin >= 0 ? `jeu de ${fmt(r.jmin, 1)} à ${fmt(r.jmax, 1)} µm` : r.jmax <= 0 ? `serrage de ${fmt(-r.jmax, 1)} à ${fmt(-r.jmin, 1)} µm` : `de ${fmt(-r.jmin, 1)} µm de serrage à ${fmt(r.jmax, 1)} µm de jeu`}</p>`;
+      };
+      for (const i of [D, H, S]) i.addEventListener('input', calc), i.addEventListener('change', calc);
+      body.append(F('Diamètre nominal', D, 'mm'), F('Alésage', H), F('Arbre', S),
+        E('div', { class: 'chips' }, ...COMMON_FITS.map(([h, s, t]) => E('button', { class: 'chip', title: t, onclick: () => { H.value = h; S.value = s; calc(); } }, `${h}/${s}`))),
+        E('div', { class: 'note' }, ...COMMON_FITS.map(([h, s, t]) => E('div', {}, E('b', {}, `${h}/${s}`), ' : ' + t))));
+      calc();
+    } else if (tab === 'bend') {
+      const a = num(50), b = num(30), A = num(90), e = num(2), Ri = num(2), K = num(0.33);
+      const calc = () => {
+        const r = bend({ a: evalNum(a.value) || 0, b: evalNum(b.value) || 0, A: evalNum(A.value) || 90, e: evalNum(e.value) || 1, Ri: evalNum(Ri.value) || 0, K: evalNum(K.value) ?? 0.33 });
+        out.innerHTML = `<table class="tbl"><tr><td>Longueur développée</td><td><b>${fmt(r.L, 2)} mm</b></td></tr><tr><td>Longueur d'arc (BA)</td><td>${fmt(r.ba, 2)} mm</td></tr><tr><td>Retrait extérieur (SB)</td><td>${fmt(r.sb, 2)} mm</td></tr><tr><td>Déduction de pli (BD)</td><td>${fmt(r.bd, 2)} mm</td></tr></table>`;
+      };
+      for (const i of [a, b, A, e, Ri, K]) i.addEventListener('input', calc);
+      body.append(F('Aile 1 (cote extérieure)', a, 'mm'), F('Aile 2 (cote extérieure)', b, 'mm'), F('Angle de pliage', A, '°'), F('Épaisseur', e, 'mm'), F('Rayon intérieur', Ri, 'mm'), F('Facteur K', K),
+        E('div', { class: 'note' }, 'Facteur K usuel : 0,33 en pliage en V acier (Ri ≈ e), 0,4 à 0,45 pour Ri ≈ 2e, 0,5 pour les grands rayons. Pour plusieurs plis, utilisez « Tôle pliée » (onglet Chaudronnerie).'));
+      calc();
+    } else if (tab === 'mass') {
+      const shapes = ['Tôle / plat (L × l × e)', 'Tube rond (De × e × L)', 'Rond plein (D × L)', 'Tube carré (a × e × L)', 'Carré plein (a × L)'];
+      const sh = sel(shapes, shapes[0]), mat = sel(Object.keys(MATERIALS), 'Acier');
+      const x = num(1000), y = num(500), z = num(3);
+      const calc = () => {
+        const X = evalNum(x.value) || 0, Y = evalNum(y.value) || 0, Zz = evalNum(z.value) || 0, i = shapes.indexOf(sh.value);
+        let A = 0, Lm = 0; // section mm² et longueur
+        if (i === 0) { A = Y * Zz; Lm = X; }
+        if (i === 1) { A = Math.PI / 4 * (X * X - (X - 2 * Y) ** 2); Lm = Zz; }
+        if (i === 2) { A = Math.PI / 4 * X * X; Lm = Y; }
+        if (i === 3) { A = X * X - (X - 2 * Y) ** 2; Lm = Zz; }
+        if (i === 4) { A = X * X; Lm = Y; }
+        const rho = MATERIALS[mat.value].density;
+        const kgm = A * rho / 1000;
+        out.innerHTML = `<table class="tbl"><tr><td>Masse</td><td><b>${fmt(kgm * Lm / 1000, 3)} kg</b></td></tr><tr><td>Masse linéique</td><td>${fmt(kgm, 3)} kg/m</td></tr>${i === 0 ? `<tr><td>Masse surfacique</td><td>${fmt(Zz * rho, 2)} kg/m²</td></tr>` : ''}</table>`;
+      };
+      const labels = () => { const i = shapes.indexOf(sh.value); return [['Longueur L', 'Largeur l', 'Épaisseur e'], ['Ø extérieur', 'Épaisseur', 'Longueur'], ['Diamètre', 'Longueur', '—'], ['Côté a', 'Épaisseur', 'Longueur'], ['Côté a', 'Longueur', '—']][i]; };
+      const fx = F('', x, 'mm'), fy = F('', y, 'mm'), fz = F('', z, 'mm');
+      const relabel = () => { const l = labels(); fx.firstChild.textContent = l[0]; fy.firstChild.textContent = l[1]; fz.firstChild.textContent = l[2]; fz.style.display = l[2] === '—' ? 'none' : ''; calc(); };
+      for (const i of [x, y, z]) i.addEventListener('input', calc);
+      sh.addEventListener('change', relabel); mat.addEventListener('change', calc);
+      body.append(F('Forme', sh), F('Matériau', mat), fx, fy, fz);
+      relabel();
+    } else {
+      const rows = Object.entries(THREADS).map(([k, v]) => `<tr><td><b>${k}</b></td><td>${fmt(v[0], 2)}</td><td>${fmt(v[1], 1)}</td><td>${fmt(v[2], 1)}</td><td>${fmt(v[3], 1)} × ${fmt(v[4], 1)}</td><td>${v[5]}</td></tr>`).join('');
+      out.innerHTML = `<table class="tbl"><tr><th>Filet</th><th>Pas</th><th>Ø foret taraudage</th><th>Ø passage (moyen)</th><th>Lamage CHC Ø × prof.</th><th>Couple 8.8 (N·m)*</th></tr>${rows}</table><div class="note">* Couple de serrage indicatif pour vis classe 8.8, frottement µ ≈ 0,14 (lubrification légère). Vérifiez selon votre application.</div>`;
+    }
+    this.modal(E('div', { style: 'min-width:520px' }, E('h2', { html: icon('calc', 22) + 'Calculateurs d\'atelier' }), head, body, out,
+      E('div', { class: 'actions' }, E('button', { class: 'btn', onclick: () => this.closeModal() }, 'Fermer'))));
+  }
+
+  // ================================================================ guides pas à pas
+  tutorialsDialog() {
+    const T = this.tutorials();
+    this.modal(E('div', { style: 'max-width:640px' }, E('h2', { html: icon('play', 22) + 'Guides pas à pas' }),
+      E('p', { style: 'color:var(--muted);margin-top:0' }, 'Choisissez un guide : une bulle vous accompagne étape par étape, avec un bouton « Faire pour moi » à chaque étape.'),
+      E('div', { class: 'exp-grid' }, ...T.map((t, i) => E('button', { onclick: () => { this.closeModal(); this.startCoach(i); }, html: icon(t.ic, 26) + `<div><b>${t.title}</b><small>${t.sub}</small></div>` }))),
+      E('div', { class: 'actions' }, E('button', { class: 'btn', onclick: () => this.closeModal() }, 'Fermer'))));
+  }
+
+  tutorials() {
+    const sel = (type, kind) => () => { const o = this.model.objects.find((x) => x.type === type && (!kind || x.params.kind === kind)); if (o) this.select([o.id]); return o; };
+    return [
+      { title: 'Ma première pièce', sub: 'esquisse → volume → perçage → plan', ic: 'sketch', steps: [
+        ['Créez une esquisse sur le plan du dessus.', () => { this.newSketchDialog(); }],
+        ['Tapez R, puis « 0;0 » Entrée et « 120;80 » Entrée : un rectangle de 120 × 80 est dessiné.', () => { if (this.mode !== 'sketch') this.createSketch(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), Z.clone(), new THREE.Vector3(), null, 'Esquisse'); this.editor.obj.params.entities.push({ type: 'rect', x: -60, y: -40, w: 120, h: 80 }); this.sketchChanged(); this.fitView(); }],
+        ['Cliquez « Extruder » : la plaque prend du volume. Réglez la hauteur dans le panneau de droite ou directement dans la bulle au-dessus de la pièce.', () => { this.fromSketch('extrude'); }],
+        ['Perçage : touche H, choisissez « Passage M8 », puis cliquez sur le dessus de la plaque.', () => { this.holeDialog(); }],
+        ['Mise en plan : onglet « Plan & Export » → « Plan 2D ». Choisissez le format, remplissez le cartouche et téléchargez le DXF ou le PDF.', () => { this.drawingDialog(); }],
+      ] },
+      { title: 'Tôle pliée en U', sub: 'profil, facteur K, développé DXF', ic: 'bent', steps: [
+        ['Onglet « Chaudronnerie » → « Tôle pliée », puis cliquez dans la vue.', () => { this.tab = 'sheet'; this.renderRibbon(); const p = SHEET_DEFAULTS('bent'); const o = this.model.add({ type: 'sheet', params: p }); this.commit(); this.select([o.id]); this.fitView(); }],
+        ['Le profil s\'écrit « longueur;angle;longueur… » : 40;90;80;90;40 donne un U. Modifiez-le dans la bulle ou le panneau de droite.', sel('sheet', 'bent')],
+        ['Réglez l\'épaisseur, le rayon intérieur et le facteur K (0,33 en pliage en V courant).', sel('sheet', 'bent')],
+        ['Cliquez « Développé à plat (DXF) » : vous obtenez le flan avec les lignes de pli, prêt pour la découpe.', () => { const o = sel('sheet', 'bent')(); if (o) this.flatDialog(o); }],
+      ] },
+      { title: 'Carré-rond de ventilation', sub: 'transition et son développé', ic: 'hopper', steps: [
+        ['Onglet « Chaudronnerie » → « Carré-rond / trémie ».', () => { this.tab = 'sheet'; this.renderRibbon(); const o = this.model.add({ type: 'sheet', params: SHEET_DEFAULTS('transition') }); this.commit(); this.select([o.id]); this.fitView(); }],
+        ['Saisissez le rectangle du bas, le Ø du haut et la hauteur. Le décalage permet une transition excentrée.', sel('sheet', 'transition')],
+        ['« Développé (DXF) » : le gabarit avec les lignes de roulage (en rouge) et le joint au milieu d\'un côté.', () => { const o = sel('sheet', 'transition')(); if (o) this.flatDialog(o); }],
+      ] },
+      { title: 'Assemblage vissé', sub: 'perçages lamés + vis CHC automatiques', ic: 'screw', steps: [
+        ['Posez un bloc (onglet Créer → Bloc, clic dans la vue).', () => { const o = this.model.add({ type: 'box', params: { l: 120, w: 80, h: 20, r: 0 } }); this.commit(); this.select([o.id]); this.fitView(); }],
+        ['Touche H → « Passage M8 », type « Lamage », puis cliquez 2 ou 3 fois sur le dessus du bloc.', () => { this.holeDialog(); }],
+        ['Catalogue → « Vis CHC » → M8 : approchez la souris d\'un trou, la vis s\'y place toute seule (🎯).', () => { this.libSearch('chc M8'); }],
+        ['Outils → Nomenclature : la liste des pièces avec quantités et masses, exportable vers Excel.', () => { this.bomDialog(); }],
+      ] },
+      { title: 'Plan professionnel', sub: 'format, échelle, cartouche, nomenclature', ic: 'drawing', steps: [
+        ['Chargez l\'exemple (ou votre projet).', () => { if (!this.model.objects.length) this.loadExample(); }],
+        ['Plan & Export → « Plan 2D » : choisissez A4 / A3…, l\'échelle normalisée est calculée automatiquement.', () => { this.drawingDialog(); }],
+        ['Remplissez société, dessinateur, indice : ils sont mémorisés pour vos prochains plans. Téléchargez en DXF ou imprimez en PDF.', () => {}],
+      ] },
+    ];
+  }
+
+  startCoach(i) {
+    const t = this.tutorials()[i];
+    let k = 0;
+    $('#coach')?.remove();
+    const box = E('div', { id: 'coach' });
+    const draw = () => {
+      const [txt, act] = t.steps[k];
+      box.innerHTML = '';
+      box.append(E('div', { class: 'coach-h' }, E('b', {}, t.title), E('span', {}, `Étape ${k + 1} / ${t.steps.length}`)), E('p', {}, txt),
+        E('div', { class: 'btnrow' },
+          E('button', { class: 'btn', onclick: () => { try { act(); } catch (e) { this.toast(e.message, true); } } }, '✨ Faire pour moi'),
+          k > 0 ? E('button', { class: 'btn', onclick: () => { k--; draw(); } }, '◀') : null,
+          k < t.steps.length - 1 ? E('button', { class: 'btn primary', onclick: () => { k++; draw(); } }, 'Suivant ▶') : E('button', { class: 'btn primary', onclick: () => box.remove() }, 'Terminer ✓'),
+          E('button', { class: 'btn', title: 'Fermer le guide', onclick: () => box.remove() }, '✕')));
+    };
+    draw();
+    $('#viewport').append(box);
+  }
+
   // ================================================================ fichiers
   newProject() {
     if (this.model.objects.length && !confirm('Créer un nouveau projet ? Les modifications non enregistrées seront perdues.')) return;
@@ -1721,40 +2288,58 @@ class App {
     const bodies = this.exportBodies();
     if (!bodies.length) return;
     const views = { 'Face': true, 'Dessus': true, 'Gauche': true, 'Droite': false, 'Isométrique': true };
-    const opts = { hidden: true, dims: true, title: this.docName };
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('formacad.cartouche') || '{}'); } catch { /* rien */ }
+    const ids = bodies.map((b) => b.obj.id);
+    const bomAll = this.bom().filter((r) => r.objs.some((o) => ids.includes(o.id)));
+    const mats = {};
+    for (const b of bodies) mats[b.obj.material] = (mats[b.obj.material] || 0) + 1;
+    const mainMat = Object.entries(mats).sort((x, y) => y[1] - x[1])[0]?.[0] || '';
+    const totalMass = bomAll.reduce((a, r) => a + r.total, 0);
+    const opts = {
+      hidden: true, dims: true, title: this.docName, paper: saved.paper || 'A3', withBom: bomAll.length > 1,
+      fields: { societe: saved.societe || '', auteur: saved.auteur || '', indice: saved.indice || 'A', matiere: Object.keys(mats).length > 1 ? 'Voir nomenclature' : mainMat, date: new Date().toLocaleDateString('fr-FR'), masse: `Masse : ${totalMass >= 1000 ? fmt(totalMass / 1000, 2) + ' kg' : fmt(totalMass, 0) + ' g'}` },
+    };
+    const full = () => ({ ...opts, bom: opts.withBom ? bomAll : null });
     const prev = E('div', { class: 'drawing-preview' });
+    const scaleInfo = E('b', {}, '');
     let layout = null;
+    const redraw = () => {
+      if (!layout) return;
+      const d = EX.drawingPrims(layout, full());
+      scaleInfo.textContent = d.paper ? `${d.paper} paysage – échelle ${EX.scaleLabel(d.scale)}` : 'Échelle 1:1 (sans cadre)';
+      prev.innerHTML = EX.drawingToSvg(layout, { ...full(), forScreen: true });
+    };
     const update = () => {
       const names = Object.keys(views).filter((v) => views[v]);
-      if (!names.length) { prev.innerHTML = ''; return; }
+      if (!names.length) { prev.innerHTML = ''; layout = null; return; }
       prev.innerHTML = '<div style="padding:20px;color:#888">Calcul des vues…</div>';
-      setTimeout(() => {
-        layout = EX.layoutDrawing(bodies, names, { hidden: opts.hidden });
-        prev.innerHTML = EX.drawingToSvg(layout, { ...opts, forScreen: true });
-      }, 20);
+      setTimeout(() => { layout = EX.layoutDrawing(bodies, names, { hidden: opts.hidden }); redraw(); }, 20);
     };
-    const cb = (label, obj, k) => { const c = E('input', { type: 'checkbox', checked: obj[k], onchange: () => { obj[k] = c.checked; update(); } }); return E('label', { class: 'field', style: 'cursor:pointer' }, c, E('span', { style: 'flex:1' }, label)); };
-    const title = E('input', { type: 'text', value: opts.title, style: 'width:100%', onchange: () => { opts.title = title.value; update(); } });
+    const persist = () => { try { localStorage.setItem('formacad.cartouche', JSON.stringify({ paper: opts.paper, societe: opts.fields.societe, auteur: opts.fields.auteur, indice: opts.fields.indice })); } catch { /* rien */ } };
+    const cb = (label, obj, k, full = false) => { const c = E('input', { type: 'checkbox', checked: obj[k], onchange: () => { obj[k] = c.checked; full ? update() : redraw(); } }); return E('label', { class: 'field', style: 'cursor:pointer' }, c, E('span', { style: 'flex:1' }, label)); };
+    const txt = (label, obj, k) => { const i = E('input', { type: 'text', value: obj[k] || '', style: 'width:100%', onchange: () => { obj[k] = i.value; persist(); redraw(); } }); return E('div', { class: 'f2' }, E('span', {}, label), i); };
+    const paper = E('select', { onchange: () => { opts.paper = paper.value; persist(); redraw(); } }, ...['A4', 'A3', 'A2', 'A1', 'A0', 'Aucun'].map((p) => E('option', { value: p, selected: p === opts.paper }, p === 'Aucun' ? 'Sans cadre (1:1)' : p + ' paysage')));
     const n = safeName(this.docName);
     const box = E('div', {},
       E('h2', { html: icon('drawing', 22) + 'Mise en plan' }),
       E('div', { class: 'drawing-wrap' }, prev, E('div', { class: 'drawing-opts' },
-        E('h4', {}, 'Vues'), ...Object.keys(views).map((v) => cb(v, views, v)),
-        E('h4', {}, 'Options'), cb('Lignes cachées (pointillés)', opts, 'hidden'), cb('Cotes d\'encombrement', opts, 'dims'),
-        E('div', { style: 'margin:8px 0 4px;color:var(--muted)' }, 'Titre'), title,
-        E('div', { class: 'note', style: 'margin-top:10px' }, 'Échelle 1:1, unités en mm. Calques DXF : VISIBLE, CACHE, COTES, TEXTE.'),
-        E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: () => { if (layout) { download(EX.drawingToDxf(layout, opts), n + '_plan.dxf', 'application/dxf'); this.toast('Plan exporté en DXF'); } }, html: icon('export', 16) + 'Télécharger DXF' }),
-        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (layout) download(EX.drawingToSvg(layout, opts), n + '_plan.svg', 'image/svg+xml'); }, html: icon('export', 16) + 'Télécharger SVG' }),
-        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (layout) this.printSvg(EX.drawingToSvg(layout, opts)); }, html: icon('drawing', 16) + 'Imprimer / PDF' }),
+        E('div', { class: 'field' }, E('label', {}, 'Format'), paper), E('div', { class: 'note', style: 'margin-bottom:6px' }, scaleInfo),
+        E('h4', {}, 'Vues'), ...Object.keys(views).map((v) => cb(v, views, v, true)),
+        E('h4', {}, 'Options'), cb('Lignes cachées', opts, 'hidden', true), cb('Cotes d\'encombrement', opts, 'dims'), cb('Nomenclature', opts, 'withBom'),
+        E('h4', {}, 'Cartouche'), txt('Titre', opts, 'title'), txt('Société', opts.fields, 'societe'), txt('Dessiné par', opts.fields, 'auteur'), txt('Matière', opts.fields, 'matiere'), txt('Indice', opts.fields, 'indice'),
+        E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: () => { if (layout) { download(EX.drawingToDxf(layout, full()), n + '_plan.dxf', 'application/dxf'); this.toast('Plan exporté en DXF (échelle papier, cotes en vraie grandeur)'); } }, html: icon('export', 16) + 'Télécharger DXF' }),
+        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (layout) this.printSvg(EX.drawingToSvg(layout, full()), opts.paper); }, html: icon('drawing', 16) + 'Imprimer / PDF' }),
+        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (layout) download(EX.drawingToSvg(layout, full()), n + '_plan.svg', 'image/svg+xml'); }, html: icon('export', 16) + 'Télécharger SVG' }),
         E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => this.closeModal() }, 'Fermer'))));
     this.modal(box);
     update();
   }
 
-  printSvg(svg) {
+  printSvg(svg, paper = 'A4') {
     const w = window.open('', '_blank');
     if (!w) { this.toast('Impression indisponible ici : téléchargement du plan en SVG (imprimable)'); return download(svg, safeName(this.docName) + '_plan.svg', 'image/svg+xml'); }
-    w.document.write(`<!doctype html><html><head><title>${esc(this.docName)} – plan</title><style>@page{size:A4 landscape;margin:10mm}html,body{margin:0}svg{width:100%;height:auto;max-height:190mm}</style></head><body>${svg.replace(/^<\?xml[^>]*>/, '')}<script>setTimeout(()=>print(),300)<\/script></body></html>`);
+    w.document.write(`<!doctype html><html><head><title>${esc(this.docName)} – plan</title><style>@page{size:${EX.PAPERS[paper] ? paper : 'A4'} landscape;margin:0}html,body{margin:0}svg{width:100%;height:auto;display:block}</style></head><body>${svg.replace(/^<\?xml[^>]*>/, '')}<script>setTimeout(()=>print(),300)<\/script></body></html>`);
     w.document.close();
   }
 
@@ -1786,6 +2371,8 @@ class App {
       ${k('Glisser gauche', 'Tourner la vue')}${k('Glisser droit / molette', 'Déplacer la vue')}${k('Molette', 'Zoom (vers le curseur)')}
       ${k('F', 'Tout afficher')}${k('0 / 1 / 3 / 7', 'Vue iso / face / droite / dessus')}
       ${k('S', 'Nouvelle esquisse')}${k('E', 'Modifier l\'esquisse de l\'objet sélectionné')}${k('H', 'Perçage')}${k('B', 'Catalogue')}${k('I', 'Importer un fichier')}${k('D', 'Mesurer une distance')}
+      ${k('Ctrl+K', 'Rechercher n\'importe quelle commande ou pièce du catalogue')}${k('Clic droit', 'Menu des actions possibles à cet endroit')}
+      ${k('A', 'Contact face contre face')}${k('X', 'Vue éclatée')}${k('Q', 'Isoler la sélection')}${k('W', 'Cordon de soudure')}${k('C', 'Calculateurs d\'atelier')}
       ${k('M / T', 'Poignées de déplacement / rotation')}${k('Ctrl+D', 'Dupliquer')}${k('Suppr', 'Supprimer')}
       ${k('Ctrl+Z / Ctrl+Y', 'Annuler / rétablir')}${k('Ctrl+S / Ctrl+O', 'Enregistrer / ouvrir')}${k('Échap', 'Annuler l\'action en cours')}
       <b style="grid-column:1/3;margin-top:8px">En esquisse</b>
