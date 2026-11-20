@@ -9,7 +9,12 @@ async function getOcct() {
         import('occt-import-js'),
         import('occt-import-js/dist/occt-import-js.wasm?url'),
       ]);
-      const buf = await (await fetch(wasmUrl)).arrayBuffer();
+      let buf;
+      if (wasmUrl.startsWith('data:')) {
+        const bin = atob(wasmUrl.slice(wasmUrl.indexOf(',') + 1));
+        buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      } else buf = await (await fetch(wasmUrl)).arrayBuffer();
       return occtimportjs({ wasmBinary: buf });
     })();
   }

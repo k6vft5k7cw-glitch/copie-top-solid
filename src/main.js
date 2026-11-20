@@ -28,13 +28,41 @@ const E = (tag, props = {}, ...kids) => {
 const fmt = (v, d = 2) => (Math.round(v * 10 ** d) / 10 ** d).toLocaleString('fr-FR', { maximumFractionDigits: d });
 const fmtIn = (v) => String(Math.round(v * 1e4) / 1e4).replace('.', ',');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** Calcul simple (+ - * / parenthèses) sans eval */
 function evalNum(txt) {
   const s = String(txt).replace(/,/g, '.').replace(/\s/g, '');
-  if (!/^[0-9+\-*/().]+$/.test(s)) return null;
-  try { const v = Function('"use strict";return (' + s + ')')(); return Number.isFinite(v) ? v : null; } catch { return null; }
+  if (!s || !/^[0-9+\-*/().]+$/.test(s)) return null;
+  let i = 0;
+  const num = () => { const m = /^\d*\.?\d+(e[+-]?\d+)?|^\d+\./.exec(s.slice(i)); if (!m) throw 0; i += m[0].length; return parseFloat(m[0]); };
+  const factor = () => {
+    if (s[i] === '-') { i++; return -factor(); }
+    if (s[i] === '+') { i++; return factor(); }
+    if (s[i] === '(') { i++; const v = expr(); if (s[i] !== ')') throw 0; i++; return v; }
+    return num();
+  };
+  const term = () => { let v = factor(); while (s[i] === '*' || s[i] === '/') { const op = s[i++]; const w = factor(); v = op === '*' ? v * w : v / w; } return v; };
+  const expr = () => { let v = term(); while (s[i] === '+' || s[i] === '-') { const op = s[i++]; const w = term(); v = op === '+' ? v + w : v - w; } return v; };
+  try { const v = expr(); return i === s.length && Number.isFinite(v) ? v : null; } catch { return null; }
 }
-function download(data, name, type = 'application/octet-stream') {
+
+// Formats que la page claude.ai peut proposer directement ; les autres sont livrés dans un .zip
+const DIRECT_EXT = new Set(['png', 'svg', 'json', 'zip', 'txt', 'html', 'csv', 'pdf']);
+let dlCap;
+async function download(data, name, type = 'application/octet-stream') {
   const blob = data instanceof Blob ? data : new Blob([data], { type });
+  if (dlCap === undefined) dlCap = window.claude?.use ? await window.claude.use('downloads').catch(() => null) : null;
+  if (dlCap) {
+    let file = blob, fname = name;
+    const ext = name.split('.').pop().toLowerCase();
+    if (ext === 'fcad') fname = name.replace(/\.fcad$/, '.fcad.json');
+    else if (!DIRECT_EXT.has(ext)) {
+      const { zipSync } = await import('three/addons/libs/fflate.module.js');
+      file = new Blob([zipSync({ [name]: new Uint8Array(await blob.arrayBuffer()) })]);
+      fname = name + '.zip';
+    }
+    try { await dlCap.save({ filename: fname, data: file }); } catch (e) { if (e?.code !== 'declined') window.app?.toast('Téléchargement impossible : ' + (e?.message || e?.code), true); }
+    return;
+  }
   const a = E('a', { href: URL.createObjectURL(blob), download: name });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
@@ -1633,7 +1661,7 @@ class App {
 
   printSvg(svg) {
     const w = window.open('', '_blank');
-    if (!w) return this.toast('Autorisez les fenêtres pop-up pour imprimer', true);
+    if (!w) { this.toast('Impression indisponible ici : téléchargement du plan en SVG (imprimable)'); return download(svg, safeName(this.docName) + '_plan.svg', 'image/svg+xml'); }
     w.document.write(`<!doctype html><html><head><title>${esc(this.docName)} – plan</title><style>@page{size:A4 landscape;margin:10mm}html,body{margin:0}svg{width:100%;height:auto;max-height:190mm}</style></head><body>${svg.replace(/^<\?xml[^>]*>/, '')}<script>setTimeout(()=>print(),300)<\/script></body></html>`);
     w.document.close();
   }
