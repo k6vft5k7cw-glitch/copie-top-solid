@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FormaCAD</title>
+  <meta name="description" content="FormaCAD – logiciel de CAO 3D simple : esquisses, volumes, composants normalisés, mise en plan, export DXF / STEP / STL." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7z' fill='%231565c0'/%3E%3Cpath d='M12 12l9-5M12 12v10M12 12L3 7' stroke='white' stroke-width='1.5' fill='none'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand"><span class="logo"></span>FormaCAD</div>
+      <div id="quick"></div>
+      <nav id="tabs"></nav>
+      <div class="spacer"></div>
+      <div id="docname" title="Nom du projet"></div>
+    </header>
+    <div id="ribbon"></div>
+    <main>
+      <aside id="left">
+        <div class="paneltabs">
+          <button data-pane="tree" class="active">Arbre de construction</button>
+          <button data-pane="lib">Catalogue</button>
+        </div>
+        <div id="pane-tree" class="pane"></div>
+        <div id="pane-lib" class="pane hidden"></div>
+      </aside>
+      <section id="viewport">
+        <div id="viewbar"></div>
+        <div id="cursorLabel" class="hidden"></div>
+        <div id="measureLabel" class="hidden"></div>
+        <div id="welcome" class="hidden"></div>
+        <div id="sketchbanner" class="hidden"></div>
+      </section>
+      <aside id="right"><div id="props"></div></aside>
+    </main>
+    <footer id="status">
+      <span id="hint"></span>
+      <span class="spacer"></span>
+      <span id="coords"></span>
+      <label class="tog" title="Aimanter les points sur la grille"><input type="checkbox" id="snapGrid" checked /> Grille aimantée</label>
+      <label class="tog" title="Accrocher aux extrémités, centres et milieux"><input type="checkbox" id="snapPoints" checked /> Accroche points</label>
+      <label class="tog">Pas
+        <select id="gridStep">
+          <option>0.1</option><option>0.5</option><option>1</option><option>2</option><option selected>5</option><option>10</option><option>25</option><option>50</option>
+        </select> mm</label>
+    </footer>
+  </div>
+  <div id="modal" class="hidden"><div class="box"></div></div>
+  <div id="toast"></div>
+  <input type="file" id="fileInput" hidden />
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

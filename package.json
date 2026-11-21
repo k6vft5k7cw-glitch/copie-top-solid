@@ -1,0 +1,33 @@
+{
+  "name": "formacad",
+  "version": "1.0.0",
+  "description": "FormaCAD – CAO 3D simple et ergonomique : esquisses, volumes, composants normalisés, mise en plan, export DXF/STEP/STL",
+  "scripts": {
+    "dev": "vite --open",
+    "build": "vite build && vite build --mode single && node scripts/rename.mjs",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/k6vft5k7cw-glitch/copie-top-solid.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/k6vft5k7cw-glitch/copie-top-solid/issues"
+  },
+  "homepage": "https://github.com/k6vft5k7cw-glitch/copie-top-solid#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
+    "clipper-lib": "6.4.2",
+    "occt-import-js": "0.0.22",
+    "three": "0.170.0",
+    "three-bvh-csg": "0.0.17",
+    "three-mesh-bvh": "0.8.3"
+  },
+  "devDependencies": {
+    "vite": "5.4.11",
+    "vite-plugin-singlefile": "2.0.3"
+  },
+  "type": "module",
+  "private": true
+}
