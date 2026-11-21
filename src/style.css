@@ -279,3 +279,6 @@ main { flex: 1; display: flex; min-height: 0; }
 #ai-panel .ai-input { border-top: 1px solid var(--line); padding: 8px; }
 #ai-panel textarea { width: 100%; resize: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel2); font: inherit; }
 #ai-panel .ai-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.ai-key { max-width: 100% !important; line-height: 1.5; }
+.ai-keyrow { display: flex; gap: 6px; margin-top: 8px; }
+.ai-keyrow input { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }

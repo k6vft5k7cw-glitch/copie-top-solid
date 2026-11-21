@@ -38,6 +38,12 @@ Matériaux disponibles : ${Object.keys(MATERIALS).join(', ')}.
 Commence par get_project si tu as besoin de connaître le projet. Ne supprime rien sans demande explicite.`;
 }
 
+const KEY_STORE = 'formacad.apikey';
+const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
+const setKey = (k) => { try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); } catch { /* stockage indisponible */ } };
+
+const blobToB64 = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); });
+
 export class Assistant {
   constructor(app) {
     this.app = app;
@@ -172,6 +178,25 @@ export class Assistant {
     ];
   }
 
+  /** 'claude' (page claude.ai), 'api' (clé API) ou null */
+  async mode() {
+    const s = await this.ready;
+    if (s) return 'claude';
+    return getKey() ? 'api' : null;
+  }
+
+  keyBox() {
+    const inp = E('input', { type: 'password', placeholder: 'sk-ant-…', value: getKey(), autocomplete: 'off' });
+    const box = E('div', { class: 'ai-msg ai ai-key' },
+      E('div', { html: '<b>🔑 Clé API Anthropic</b><br>Dans la version téléchargée, l\'assistant utilise votre propre clé API (facturée à l\'usage par Anthropic, environ quelques centimes par demande).<br>1. Créez un compte sur <b>console.anthropic.com</b>, ajoutez un moyen de paiement<br>2. Menu <b>API Keys → Create Key</b>, copiez la clé<br>3. Collez-la ici. Elle reste uniquement sur cet ordinateur.' }),
+      E('div', { class: 'ai-keyrow' }, inp,
+        E('button', { class: 'btn primary', onclick: () => { const k = inp.value.trim(); if (!/^sk-ant-/.test(k)) { this.app.toast('Clé invalide : elle commence par « sk-ant- »', true); return; } setKey(k); box.remove(); this.addMsg('ai', '✅ Clé enregistrée. Je suis prêt : décrivez ce que vous voulez concevoir.'); } }, 'Enregistrer')),
+      getKey() ? E('button', { class: 'btn', style: 'margin-top:6px', onclick: () => { setKey(''); inp.value = ''; this.app.toast('Clé supprimée de cet ordinateur'); } }, 'Supprimer la clé enregistrée') : null);
+    this.msgs.append(box);
+    this.msgs.scrollTop = 1e9;
+    setTimeout(() => inp.focus(), 50);
+  }
+
   // ------------------------------------------------------------ interface
   toggle() {
     if (this.panel) { this.panel.remove(); this.panel = null; return; }
@@ -216,9 +241,8 @@ export class Assistant {
     send.onclick = go;
     ta.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } });
     setTimeout(() => ta.focus(), 50);
-    this.ready.then((s) => {
-      if (!s) this.addMsg('ai', '⚠️ L\'assistant IA a besoin de la version en ligne de FormaCAD (lien claude.ai, connecté à votre compte Claude). La version téléchargée fonctionne hors connexion mais sans IA.', 'warn');
-    });
+    p.querySelector('.ai-head').insertBefore(E('button', { class: 'btn', title: 'Clé API Anthropic (version téléchargée)', onclick: () => this.keyBox(), html: '🔑' }), p.querySelector('.ai-head').lastChild);
+    this.ready.then((s) => { if (!s && !getKey()) this.keyBox(); });
   }
 
   addMsg(who, text, cls = '') {
@@ -239,7 +263,10 @@ export class Assistant {
   async ask(text, image) {
     this.addMsg('me', text);
     const s = await this.ready;
-    if (!s) { this.addMsg('ai', 'L\'assistant IA n\'est disponible que dans la version en ligne (lien claude.ai).', 'warn'); return; }
+    if (!s) {
+      if (!getKey()) { this.addMsg('ai', 'Pour utiliser l\'IA dans cette version, enregistrez d\'abord une clé API (bouton 🔑).', 'warn'); this.keyBox(); return; }
+      return this.askApi(text, image);
+    }
     this.cur = this.addMsg('ai', 'Réflexion…', 'pending');
     this.after = null;
     this.turns.push({ role: 'user', content: text + (image ? '\n(Une image est jointe : un croquis ou plan à interpréter ; cotes en mm.)' : '') });
@@ -265,6 +292,76 @@ export class Assistant {
       this.cur.classList.add('warn');
       this.turns.pop();
     }
+    this.cur = null;
+  }
+
+  // ------------------------------------------------------------ mode clé API (version téléchargée, internet requis)
+  async askApi(text, image) {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: getKey(), dangerouslyAllowBrowser: true, ...(window.__formacadFetch ? { fetch: window.__formacadFetch } : {}) });
+    const tools = this.tools();
+    const apiTools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema || { type: 'object', properties: {} } }));
+    const content = [];
+    if (image) content.push({ type: 'image', source: { type: 'base64', media_type: image.type || 'image/png', data: await blobToB64(image) } });
+    content.push({ type: 'text', text: text + '\n\nÉtat actuel du projet : ' + JSON.stringify(this.app.model.objects.slice(0, 60).map((o) => ({ id: o.id, name: this.app.model.displayName(o), type: o.type, pos: o.pos, parent: o.parent }))) });
+    this.apiMsgs = this.apiMsgs || [];
+    const start = this.apiMsgs.length;
+    this.apiMsgs.push({ role: 'user', content });
+    this.cur = this.addMsg('ai', 'Réflexion…', 'pending');
+    this.after = null;
+    const show = (t) => { this.cur.textContent = t; this.cur.classList.remove('pending'); this.msgs.scrollTop = 1e9; };
+    let said = '';
+    try {
+      for (let round = 0; round < 15; round++) {
+        if (this.ctl.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'cancelled' });
+        const r = await client.beta.messages.create({
+          model: 'claude-opus-5-5',
+          max_tokens: 16000,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          system: rules(),
+          tools: apiTools,
+          messages: this.apiMsgs,
+        }, { signal: this.ctl.signal });
+        this.apiMsgs.push({ role: 'assistant', content: r.content });
+        const txt = r.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+        if (txt) { said = said ? said + '\n\n' + txt : txt; show(said); }
+        if (r.stop_reason === 'refusal') { show((said ? said + '\n\n' : '') + 'Je ne peux pas traiter cette demande ; reformulez-la.'); break; }
+        if (r.stop_reason === 'pause_turn') continue;
+        if (r.stop_reason !== 'tool_use') break;
+        const results = [];
+        for (const b of r.content) {
+          if (b.type !== 'tool_use') continue;
+          const t = tools.find((x) => x.name === b.name);
+          try {
+            if (!t) throw new Error('outil inconnu');
+            const out = await t.execute(b.input || {});
+            results.push({ type: 'tool_result', tool_use_id: b.id, content: typeof out === 'string' ? out : JSON.stringify(out) });
+          } catch (e) {
+            results.push({ type: 'tool_result', tool_use_id: b.id, content: 'Erreur : ' + (e?.message || e), is_error: true });
+          }
+        }
+        this.apiMsgs.push({ role: 'user', content: results });
+        if (!said) show('Construction en cours…');
+      }
+      if (!said) show('C\'est fait.');
+      if (this.after) this.after();
+    } catch (e) {
+      // on retire l'échange inachevé pour garder un historique valide
+      this.apiMsgs.length = start;
+      this.cur.classList.remove('pending');
+      let msg = 'Problème de connexion avec Claude : vérifiez votre connexion internet puis réessayez.';
+      if (e?.code === 'cancelled' || e?.name === 'AbortError' || e instanceof Anthropic.APIUserAbortError) msg = 'Arrêté.';
+      else if (e instanceof Anthropic.AuthenticationError) msg = 'Clé API refusée : vérifiez-la (bouton 🔑).';
+      else if (e instanceof Anthropic.PermissionDeniedError) msg = 'Cette clé n\'a pas accès à ce modèle.';
+      else if (e instanceof Anthropic.RateLimitError) msg = 'Limite d\'utilisation atteinte : patientez un peu, ou vérifiez le crédit de votre compte Anthropic.';
+      else if (e instanceof Anthropic.BadRequestError) msg = /credit|billing/i.test(e.message) ? 'Crédit insuffisant sur votre compte Anthropic (console.anthropic.com → Billing).' : 'Requête refusée : ' + e.message;
+      else if (e instanceof Anthropic.APIConnectionError) msg = 'Impossible de joindre Claude : l\'assistant a besoin d\'internet.';
+      else if (e instanceof Anthropic.APIError) msg = `Erreur du service (${e.status}) : réessayez dans un instant.`;
+      this.cur.textContent = (said ? said + '\n\n' : '') + msg;
+      this.cur.classList.add('warn');
+    }
+    if (this.apiMsgs.length > 40) this.apiMsgs = [];
     this.cur = null;
   }
 }
