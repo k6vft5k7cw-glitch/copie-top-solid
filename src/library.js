@@ -358,6 +358,46 @@ function headSolid(De, s, h1, kR, kr) {
   return lathe(prof.map(([x, z]) => [Math.max(0, x), z + h1]), 96);
 }
 
+
+// ------------------------------------------------------------------ FLUIDES / MOTORISATION
+families.push(
+  {
+    id: 'iso15552', cat: 'Pneumatique / motorisation', name: 'Vérin pneumatique double effet (encombrement)', std: 'ISO 15552',
+    cols: ['alésage', 'tige', 'carré', 'corps'],
+    sizes: { 'Ø32': [32, 12, 45, 94], 'Ø40': [40, 16, 52, 105], 'Ø50': [50, 20, 64, 106], 'Ø63': [63, 20, 75, 121], 'Ø80': [80, 25, 93, 128], 'Ø100': [100, 25, 110, 138], 'Ø125': [125, 32, 134, 160] },
+    extra: [{ k: 'course', label: 'Course', def: 100, unit: 'mm', min: 1 }, { k: 'sortie', label: 'Tige sortie (0 à 1)', def: 0.5, unit: '', min: 0, step: 0.1 }],
+    defSize: 'Ø50',
+    build: ([D, d, B, Lb], p) => {
+      const Lc = Lb + p.course;
+      const ext = Math.min(1, Math.max(0, p.sortie)) * p.course;
+      const rodL = 25 + d + ext;
+      return merge([
+        prism(makeShape(roundRectPts(B, B, B * 0.12), [circlePts(d / 2 * 0.98, 32)]), Lc),
+        cyl(d / 2, rodL, Lc - 5, 32),
+        cyl(d * 0.42, d * 1.1, Lc - 5 + rodL, 24),
+      ]);
+    },
+    label: (sz, p) => `Vérin ${sz} course ${p.course}`,
+  },
+  {
+    id: 'iec', cat: 'Pneumatique / motorisation', name: 'Moteur électrique IEC B3 à pattes (encombrement)', std: 'IEC 60072',
+    cols: ['H', 'D', 'E', 'Ø carc.', 'L carc.', 'A', 'B'],
+    sizes: {
+      'IEC 63': [63, 11, 23, 120, 200, 100, 80], 'IEC 71': [71, 14, 30, 138, 230, 112, 90], 'IEC 80': [80, 19, 40, 156, 270, 125, 100],
+      'IEC 90': [90, 24, 50, 176, 320, 140, 125], 'IEC 100': [100, 28, 60, 196, 360, 160, 140], 'IEC 112': [112, 28, 60, 220, 380, 190, 140], 'IEC 132': [132, 38, 80, 258, 460, 216, 140],
+    },
+    extra: [], defSize: 'IEC 90',
+    build: ([H, D, E, Dc, Lc, A, B]) => merge([
+      orientAxis(cyl(Dc / 2, Lc, 0, 48), 'X').translate(-Lc, 0, H),
+      orientAxis(cyl(Dc * 0.36, 14, 0, 32), 'X').translate(-14 + 0.01, 0, H),
+      orientAxis(cyl(D / 2, E, 0, 24), 'X').translate(0, 0, H),
+      prism(makeShape(roundRectPts(B + 30, A + 20, 4)), Math.max(8, H * 0.14)).translate(-Lc * 0.45, 0, 0),
+      prism(makeShape(roundRectPts(Lc * 0.5, Dc * 0.5, 4)), H - Dc * 0.4).translate(-Lc * 0.45, 0, 0),
+    ]),
+    label: (sz) => `Moteur ${sz} B3`,
+  },
+);
+
 // ---------------------------------------------------------------- générateurs spécifiques
 function bearing(d, D, B, sealed) {
   const w = (D - d) / 2;

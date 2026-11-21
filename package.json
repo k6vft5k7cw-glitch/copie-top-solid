@@ -18,6 +18,7 @@
   "homepage": "https://github.com/k6vft5k7cw-glitch/copie-top-solid#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",
+    "clipper-lib": "6.4.2",
     "occt-import-js": "0.0.22",
     "three": "0.170.0",
     "three-bvh-csg": "0.0.17",

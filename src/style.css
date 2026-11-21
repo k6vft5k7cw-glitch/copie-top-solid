@@ -244,7 +244,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #coach .coach-h { display: flex; justify-content: space-between; gap: 8px; color: var(--accent); }
 #coach .coach-h span { color: var(--muted); font-size: 12px; }
 #coach p { margin: 8px 0 10px; line-height: 1.45; }
-.calc-tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.calc-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .calc-tabs button { border: 0; background: none; padding: 8px 12px; cursor: pointer; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; }
 .calc-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
 .calc-out { margin-top: 10px; }
@@ -282,3 +282,10 @@ main { flex: 1; display: flex; min-height: 0; }
 .ai-key { max-width: 100% !important; line-height: 1.5; }
 .ai-keyrow { display: flex; gap: 6px; margin-top: 8px; }
 .ai-keyrow input { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+#modal .box h4 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .4px; }
+.cam-wrap { display: flex; gap: 16px; }
+.cam-prev { width: 58vw; height: 62vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.cam-opts { width: 300px; max-height: 66vh; overflow-y: auto; }
+.nest-list { max-height: 26vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; margin-bottom: 8px; }
+.nest-list label { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.nest-list input[type=text] { width: 48px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; }

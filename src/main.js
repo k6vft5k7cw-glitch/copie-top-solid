@@ -9,7 +9,8 @@ import { SketchEditor, sketchObject3D, findLoops, sketchShapes, ENTITY_FIELDS, E
 import * as EX from './exporters.js';
 import { importFile } from './importers.js';
 import { SHEET, SHEET_DEFAULTS, sheetFlat } from './sheet.js';
-import { HOLES, SHAFTS, COMMON_FITS, fit, deviation, bend, THREADS } from './calc.js';
+import { HOLES, SHAFTS, COMMON_FITS, fit, deviation, bend, THREADS, CUT_MATERIALS, fzFor, BEAM_CASES, STEELS, sectionProps, BOLT_AS, BOLT_CLASSES, boltCheck, weldCheck, beltLength, chainLinks, SPRING_G, bearingLife } from './calc.js';
+import * as FAB from './fab.js';
 import { icon, TYPE_ICON, FAMILY_ICON } from './icons.js';
 import { Assistant } from './assistant.js';
 
@@ -153,7 +154,7 @@ class App {
     ];
     for (const [ic, t, fn] of quick) $('#quick').append(E('button', { title: t, html: icon(ic, 18), onclick: fn }));
     $('#topbar').insertBefore(E('button', { id: 'ai-btn', title: 'Assistant IA : décrivez ce que vous voulez, il le construit', onclick: () => this.ai.toggle(), html: '✨ Assistant IA' }), $('#docname'));
-    const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['modify', 'Modifier'], ['tools', 'Outils'], ['export', 'Plan & Export'], ['help', 'Aide']];
+    const tabs = [['create', 'Créer'], ['sheet', 'Chaudronnerie'], ['fab', 'Atelier'], ['modify', 'Modifier'], ['tools', 'Outils'], ['export', 'Plan & Export'], ['help', 'Aide']];
     for (const [id, label] of tabs) $('#tabs').append(E('button', { 'data-tab': id, onclick: () => { this.tab = id; this.renderRibbon(); } }, label));
 
     const vb = $('#viewbar');
@@ -253,6 +254,30 @@ class App {
           { label: 'Coudes', ic: 'elbow', fn: () => this.libSearch('coude') },
           { label: 'Tubes', ic: 'tube', fn: () => this.libSearch('EN 10220') },
           { label: 'Fonds bombés', ic: 'sphere', fn: () => this.libSearch('fond') },
+        ] },
+      ];
+      case 'fab': return [
+        { g: 'Découpe', b: [
+          { label: 'Programme découpe', ic: 'cnc', fn: () => this.camDialog('laser'), primary: true, title: 'G-code laser, plasma ou oxycoupage avec compensation de saignée' },
+          { label: 'Imbrication', ic: 'nest', fn: () => this.nestDialog(), title: 'Placer les pièces sur une tôle, taux de chute, DXF et G-code de la tôle' },
+        ] },
+        { g: 'Usinage', b: [
+          { label: 'Programme fraisage', ic: 'cnc', fn: () => this.camDialog('mill'), title: 'Contournage 2D avec compensation d\'outil et perçages G81' },
+          { label: 'Conditions de coupe', ic: 'rotate', fn: () => this.calcDialog('cut'), title: 'Vc, N, avance : fraisage, perçage, tournage' },
+        ] },
+        { g: 'Structure / charpente', b: [
+          { label: 'Calcul de poutre', ic: 'beam2', fn: () => this.calcDialog('beam'), title: 'Flèche, contrainte, taux de travail avec les profilés du catalogue' },
+          { label: 'Boulons et soudures', ic: 'weld', fn: () => this.calcDialog('joint'), title: 'Eurocode 3 simplifié' },
+        ] },
+        { g: 'Transmission / maintenance', b: [
+          { label: 'Courroies, chaînes, engrenages', ic: 'gear', fn: () => this.calcDialog('trans') },
+          { label: 'Roulements, ressorts', ic: 'bearing', fn: () => this.calcDialog('bearing') },
+          { label: 'Ajustements ISO', ic: 'calc', fn: () => this.calcDialog('fit') },
+        ] },
+        { g: 'Pneumatique / hydraulique', b: [
+          { label: 'Vérins et hydraulique', ic: 'cylinder2', fn: () => this.calcDialog('fluid') },
+          { label: 'Vérins ISO', ic: 'cylinder2', fn: () => this.libSearch('vérin') },
+          { label: 'Moteurs IEC', ic: 'motor', fn: () => this.libSearch('moteur') },
         ] },
       ];
       case 'modify': return [
@@ -1675,6 +1700,166 @@ class App {
     this.refresh();
   }
 
+  // ================================================================ ATELIER : FAO (G-code) et imbrication
+  fabProfiles(objs) {
+    const out = [];
+    for (const o of objs) {
+      const pr = FAB.objectProfile(o, this.model, sheetFlat);
+      if (pr && FAB.profileLoops(pr.entities).length) out.push({ o, ...pr });
+    }
+    return out;
+  }
+
+  camDialog(process = 'laser') {
+    let src = this.fabProfiles(this.selObjs());
+    if (!src.length) src = this.fabProfiles(this.model.objects.filter((o) => o.type === 'sheet' && !o.role));
+    if (!src.length) return this.toast('Sélectionnez une pièce plane (esquisse, tôle, plaque, extrusion) à découper ou usiner', true);
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('formacad.cam') || '{}'); } catch { /* rien */ }
+    const D = {
+      laser: { comp: 0.3, feed: 3000, on: 'M3', off: 'M5', pierce: 0.3, lead: 3 }, plasma: { comp: 1.6, feed: 2500, on: 'M3', off: 'M5', pierce: 0.6, lead: 5 },
+      oxy: { comp: 2, feed: 500, on: 'M3', off: 'M5', pierce: 15, lead: 8 }, mill: { comp: 6, feed: 800, spindle: 12000, plungeFeed: 200, safeZ: 5, stepDown: 1.5, drillMax: 0 },
+    };
+    const o = { process, ...D[process], ...(saved[process] || {}) };
+    const n = (v) => E('input', { type: 'text', inputmode: 'decimal', value: fmtIn(v), style: 'width:90px' });
+    const Fl = (l, i, u = '') => E('div', { class: 'field' }, E('label', {}, l), i, E('span', { class: 'unit' }, u));
+    const proc = E('select', {}, ...[['laser', 'Découpe laser'], ['plasma', 'Découpe plasma'], ['oxy', 'Oxycoupage'], ['mill', 'Fraisage 2D / défonceuse']].map(([k, l]) => E('option', { value: k, selected: k === process }, l)));
+    proc.addEventListener('change', () => { this.closeModal(); this.camDialog(proc.value); });
+    const pick = E('select', {}, ...src.map((s, i) => E('option', { value: i }, this.model.displayName(s.o) + (s.thickness ? ` (ép. ${fmt(s.thickness)})` : ''))));
+    const mill = process === 'mill';
+    const f = {
+      comp: n(mill ? o.comp : o.comp), feed: n(o.feed), lead: n(o.lead ?? 0), pierce: n(o.pierce ?? 0), on: E('input', { type: 'text', value: o.on || 'M3', style: 'width:90px' }), off: E('input', { type: 'text', value: o.off || 'M5', style: 'width:90px' }),
+      spindle: n(o.spindle ?? 12000), plungeFeed: n(o.plungeFeed ?? 200), safeZ: n(o.safeZ ?? 5), stepDown: n(o.stepDown ?? 1.5), depth: n(src[0].thickness || 5), drillMax: n(o.drillMax ?? 0),
+    };
+    const prev = E('div', { class: 'cam-prev' }), stats = E('div', { class: 'info', style: 'margin:8px 0' });
+    let result = null;
+    const read = () => {
+      const v = (k) => evalNum(f[k].value) ?? 0;
+      const opt = mill
+        ? { process, comp: v('comp') / 2, feed: v('feed'), spindle: v('spindle'), plungeFeed: v('plungeFeed'), safeZ: v('safeZ'), stepDown: v('stepDown'), depth: v('depth'), drillMax: v('drillMax') }
+        : { process, comp: v('comp') / 2, feed: v('feed'), lead: v('lead'), pierce: v('pierce'), on: f.on.value.trim() || 'M3', off: f.off.value.trim() || 'M5' };
+      return opt;
+    };
+    const update = () => {
+      const s = src[+pick.value];
+      const opt = read();
+      if (mill) f.depth.dataset.k = 'depth';
+      const tp = FAB.toolpaths(s.entities, { comp: opt.comp, lead: opt.lead || 0, drillMax: opt.drillMax || 0 });
+      result = FAB.gcode(tp, { ...opt, name: this.model.displayName(s.o) });
+      try { const sv = JSON.parse(localStorage.getItem('formacad.cam') || '{}'); const { process: _p, ...rest } = opt; sv[process] = { ...rest, comp: opt.comp * 2 }; localStorage.setItem('formacad.cam', JSON.stringify(sv)); } catch { /* rien */ }
+      // aperçu
+      const loops = FAB.profileLoops(s.entities);
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const l of [...loops.map((l) => l.pts), ...tp.paths.map((p) => p.pts)]) for (const [x, y] of l) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      const m = Math.max(x1 - x0, y1 - y0) * 0.08 + 5, W = x1 - x0 + 2 * m, H = y1 - y0 + 2 * m, sw = Math.max(W, H) / 600;
+      const P = ([x, y]) => `${(x - x0 + m).toFixed(2)} ${(y1 - y + m).toFixed(2)}`;
+      const path = (pts, closed) => 'M' + pts.map(P).join('L') + (closed ? 'Z' : '');
+      let cur = [0, 0], rap = '';
+      for (const p of tp.paths) { const st = p.lead || p.pts[0]; rap += `M${P(cur)}L${P(st)}`; cur = p.pts[0]; }
+      for (const d of tp.drills) { rap += `M${P(cur)}L${P(d.c)}`; cur = d.c; }
+      prev.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" height="100%"><rect width="100%" height="100%" fill="#fff"/>
+        ${loops.map((l) => `<path d="${path(l.pts, true)}" fill="${l.hole ? '#fff' : '#eef3f8'}" stroke="#9aa4ad" stroke-width="${sw}"/>`).join('')}
+        <path d="${rap}" fill="none" stroke="#e53935" stroke-width="${sw * 0.8}" stroke-dasharray="${sw * 4} ${sw * 3}"/>
+        ${tp.paths.map((p, i) => `<path d="${(p.lead ? `M${P(p.lead)}L${P(p.pts[0])}` : '') + path(p.pts, true)}" fill="none" stroke="#1565c0" stroke-width="${sw * 1.4}"/><text x="${(p.pts[0][0] - x0 + m).toFixed(1)}" y="${(y1 - p.pts[0][1] + m).toFixed(1)}" font-size="${sw * 12}" fill="#1565c0">${i + 1}</text>`).join('')}
+        ${tp.drills.map((d) => `<circle cx="${(d.c[0] - x0 + m).toFixed(2)}" cy="${(y1 - d.c[1] + m).toFixed(2)}" r="${d.d / 2}" fill="none" stroke="#2e7d32" stroke-width="${sw * 1.4}"/>`).join('')}</svg>`;
+      stats.innerHTML = '';
+      stats.append(E('span', {}, 'Longueur de coupe'), E('b', {}, `${fmt(result.length / 1000, 2)} m`), E('span', {}, mill ? 'Contours × passes' : 'Amorçages'), E('b', {}, mill ? `${result.pierces} × ${result.passes}` : String(result.pierces)),
+        E('span', {}, mill ? 'Perçages (G81)' : 'Rapides'), E('b', {}, mill ? String(result.drills) : `${fmt(result.rapid / 1000, 2)} m`), E('span', {}, 'Temps estimé'), E('b', {}, `${fmt(result.minutes, 1)} min`));
+    };
+    for (const i of [pick, ...Object.values(f)]) { i.addEventListener('change', update); }
+    const opts = mill
+      ? [Fl('Ø de la fraise', f.comp, 'mm'), Fl('Profondeur totale', f.depth, 'mm'), Fl('Profondeur par passe', f.stepDown, 'mm'), Fl('Avance', f.feed, 'mm/min'), Fl('Avance de plongée', f.plungeFeed, 'mm/min'), Fl('Vitesse de broche', f.spindle, 'tr/min'), Fl('Z de sécurité', f.safeZ, 'mm'), Fl('Percer (G81) les trous ≤', f.drillMax, 'mm')]
+      : [Fl('Saignée (largeur de coupe)', f.comp, 'mm'), Fl('Vitesse de coupe', f.feed, 'mm/min'), Fl('Amorçage (lead-in)', f.lead, 'mm'), Fl('Temporisation de perçage', f.pierce, 's'), Fl('Code allumage', f.on), Fl('Code extinction', f.off)];
+    this.modal(E('div', {},
+      E('h2', { html: icon('cnc', 22) + 'Programme CN (G-code)' }),
+      E('div', { class: 'cam-wrap' }, prev, E('div', { class: 'cam-opts' },
+        Fl('Procédé', proc), Fl('Pièce', pick), E('h4', {}, 'Paramètres'), ...opts, stats,
+        E('div', { class: 'note' }, mill ? 'Contournage avec compensation du rayon d\'outil (extérieurs à l\'extérieur, trous à l\'intérieur). Vérifiez toujours en simulation avant usinage.' : 'Compensation de la demi-saignée intégrée, trous découpés avant le contour extérieur, amorçage dans la chute. Vérifiez toujours en simulation avant découpe.'),
+        E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: () => { if (result) { download(result.text, safeName(this.model.displayName(src[+pick.value].o)) + (mill ? '_fraisage' : '_' + process) + '.nc', 'text/plain'); this.toast('Programme G-code exporté (.nc)'); } }, html: icon('export', 16) + 'Télécharger le G-code (.nc)' }),
+        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => { if (result) { this.modal(E('div', {}, E('h2', {}, 'G-code'), E('pre', { style: 'max-height:70vh;overflow:auto;font-size:12px;background:var(--panel2);padding:10px;border-radius:8px' }, result.text.slice(0, 200000)), E('div', { class: 'actions' }, E('button', { class: 'btn', onclick: () => this.camDialog(process) }, 'Retour')))); } } }, 'Voir le code'),
+        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => this.closeModal() }, 'Fermer')))));
+    update();
+  }
+
+  nestDialog() {
+    const src = this.fabProfiles(this.model.objects.filter((o) => !o.role && o.type !== 'sketch' || (o.type === 'sketch' && o.visible)));
+    if (!src.length) return this.toast('Aucune pièce plane à imbriquer (tôles, plaques, extrusions, esquisses)', true);
+    const rows = src.map((s) => ({ s, on: E('input', { type: 'checkbox', checked: s.o.type === 'sheet' || s.o.type === 'plate' || src.length < 6 }), qty: E('input', { type: 'text', value: '1' }) }));
+    const formats = { '3000 × 1500': [3000, 1500], '2500 × 1250': [2500, 1250], '2000 × 1000': [2000, 1000], '4000 × 2000': [4000, 2000], 'Personnalisé': null };
+    const fmtSel = E('select', {}, ...Object.keys(formats).map((k) => E('option', { value: k }, k)));
+    const W = E('input', { type: 'text', value: '3000', style: 'width:70px' }), H = E('input', { type: 'text', value: '1500', style: 'width:70px' });
+    const gap = E('input', { type: 'text', value: '8', style: 'width:70px' }), margin = E('input', { type: 'text', value: '10', style: 'width:70px' });
+    const rot = E('input', { type: 'checkbox', checked: true });
+    const prev = E('div', { class: 'cam-prev' }), stats = E('div', { class: 'info', style: 'margin:8px 0' });
+    fmtSel.addEventListener('change', () => { const f = formats[fmtSel.value]; if (f) { W.value = f[0]; H.value = f[1]; } run(); });
+    let res = null, parts = [];
+    const run = () => {
+      parts = rows.filter((r) => r.on.checked).map((r) => ({ name: this.model.displayName(r.s.o), loops: FAB.profileLoops(r.s.entities), qty: Math.max(0, Math.round(evalNum(r.qty.value) || 0)), e: r.s.thickness }));
+      const sw = evalNum(W.value) || 3000, sh = evalNum(H.value) || 1500;
+      res = FAB.nest(parts.filter((p) => p.qty > 0), { W: sw, H: sh, gap: evalNum(gap.value) ?? 8, margin: evalNum(margin.value) ?? 10, rotate: rot.checked });
+      const nS = res.sheets.length, gapY = sh * 0.06;
+      const TH = Math.max(1, nS) * (sh + gapY), s1 = Math.max(sw, TH) / 700;
+      let svg = '';
+      res.sheets.forEach((S, k) => {
+        const oy = k * (sh + gapY);
+        svg += `<rect x="0" y="${oy}" width="${sw}" height="${sh}" fill="#f3f6fa" stroke="#555" stroke-width="${s1 * 1.5}"/><text x="${sw * 0.01}" y="${oy - gapY * 0.2}" font-size="${gapY * 0.6}" fill="#1565c0">Tôle ${k + 1}</text>`;
+        for (const it of S.items) for (const l of it.part.loops) { const q = FAB.placedLoop(it, l.pts); svg += `<path d="M${q.map(([x, y]) => `${x.toFixed(1)} ${(oy + sh - y).toFixed(1)}`).join('L')}Z" fill="${l.hole ? '#f3f6fa' : '#90caf9'}" stroke="#0d47a1" stroke-width="${s1}"/>`; }
+      });
+      prev.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-sw * 0.02} ${-gapY} ${sw * 1.04} ${TH + gapY}" width="100%" height="100%"><rect x="${-sw}" y="${-TH}" width="${sw * 4}" height="${TH * 4}" fill="#fff"/>${svg}</svg>`;
+      const placed = res.sheets.reduce((a, s) => a + s.items.length, 0);
+      stats.innerHTML = '';
+      stats.append(E('span', {}, 'Tôles nécessaires'), E('b', {}, String(nS)), E('span', {}, 'Pièces placées'), E('b', {}, `${placed}${res.unplaced.length ? ` (+${res.unplaced.length} trop grandes)` : ''}`),
+        E('span', {}, 'Taux d\'utilisation'), E('b', {}, nS ? `${fmt((100 * res.used) / (res.sheetArea * nS), 1)} %` : '–'), E('span', {}, 'Chute'), E('b', {}, nS ? `${fmt((res.sheetArea * nS - res.used) / 1e6, 2)} m²` : '–'));
+    };
+    for (const r of rows) { r.on.addEventListener('change', run); r.qty.addEventListener('change', run); }
+    for (const i of [W, H, gap, margin, rot]) i.addEventListener('change', run);
+    const sheetEnts = (k) => {
+      const S = res.sheets[k], ents = [];
+      for (const it of S.items) for (const l of it.part.loops) ents.push({ type: 'poly', pts: FAB.placedLoop(it, l.pts), closed: true });
+      return ents;
+    };
+    const exportDxf = () => {
+      if (!res?.sheets.length) return;
+      const dxf = new EX.DxfWriter(), sw = evalNum(W.value) || 3000, sh = evalNum(H.value) || 1500;
+      const LT = dxf.layer('TOLE', 8), LX = dxf.layer('TEXTE', 3);
+      res.sheets.forEach((S, k) => {
+        const ox = k * (sw + 200);
+        dxf.polyline([[ox, 0], [ox + sw, 0], [ox + sw, sh], [ox, sh]], true, LT);
+        dxf.text([ox, sh + 30], 25, `Tole ${k + 1} - ${sw}x${sh}`, LX);
+        EX.sketchToDxf(dxf, sheetEnts(k), 'CONTOUR', [ox, 0]);
+        for (const it of S.items) dxf.text([ox + it.x + 2, it.y + 2], 8, String(it.part.name).slice(0, 30), LX);
+      });
+      download(dxf.toString(), safeName(this.docName) + '_imbrication.dxf', 'application/dxf');
+      this.toast('Imbrication exportée en DXF (une tôle à côté de l\'autre)');
+    };
+    const gcodeSheet = () => {
+      if (!res?.sheets.length) return;
+      const k = Math.max(0, Math.min(res.sheets.length - 1, (evalNum(which.value) || 1) - 1));
+      const tp = FAB.toolpaths(sheetEnts(k), { comp: 0.15, lead: 3 });
+      let cam = {};
+      try { cam = JSON.parse(localStorage.getItem('formacad.cam') || '{}').laser || {}; } catch { /* rien */ }
+      const g = FAB.gcode(FAB.toolpaths(sheetEnts(k), { comp: (cam.comp ?? 0.3) / 2, lead: cam.lead ?? 3 }), { process: 'laser', feed: cam.feed ?? 3000, on: cam.on || 'M3', off: cam.off || 'M5', pierce: cam.pierce ?? 0.3, name: `Tole ${k + 1}` });
+      void tp;
+      download(g.text, safeName(this.docName) + `_tole${k + 1}.nc`, 'text/plain');
+      this.toast(`G-code de la tôle ${k + 1} : ${fmt(g.length / 1000, 1)} m de coupe, ≈ ${fmt(g.minutes, 0)} min (réglages laser de « Programme CN »)`);
+    };
+    const which = E('input', { type: 'text', value: '1', style: 'width:50px' });
+    this.modal(E('div', {},
+      E('h2', { html: icon('nest', 22) + 'Imbrication sur tôle' }),
+      E('div', { class: 'cam-wrap' }, prev, E('div', { class: 'cam-opts' },
+        E('h4', {}, 'Pièces et quantités'),
+        E('div', { class: 'nest-list' }, ...rows.map((r) => E('label', {}, r.on, E('span', { style: 'flex:1' }, this.model.displayName(r.s.o) + (r.s.thickness ? ` – ép. ${fmt(r.s.thickness)}` : '')), r.qty, '×'))),
+        E('div', { class: 'field' }, E('label', {}, 'Format de tôle'), fmtSel), E('div', { class: 'field' }, E('label', {}, 'Dimensions'), W, '×', H),
+        E('div', { class: 'field' }, E('label', {}, 'Espace entre pièces'), gap, E('span', { class: 'unit' }, 'mm')), E('div', { class: 'field' }, E('label', {}, 'Marge de bord'), margin, E('span', { class: 'unit' }, 'mm')),
+        E('label', { class: 'field' }, rot, E('span', { style: 'flex:1' }, 'Autoriser la rotation à 90°')),
+        stats,
+        E('div', { class: 'note' }, 'Placement par rectangles englobants (rangement en bandes). Regroupez les pièces de même épaisseur et matière sur une même imbrication.'),
+        E('button', { class: 'btn big primary', style: 'margin-top:10px', onclick: exportDxf, html: icon('export', 16) + 'Télécharger le DXF' }),
+        E('div', { class: 'field', style: 'margin-top:8px' }, E('label', {}, 'G-code laser de la tôle n°'), which, E('button', { class: 'btn', onclick: gcodeSheet }, '.nc')),
+        E('button', { class: 'btn big', style: 'margin-top:6px', onclick: () => this.closeModal() }, 'Fermer')))));
+    run();
+  }
+
   // ================================================================ cotes cliquables en esquisse
   setLineLength(e, L) {
     const d = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) || 1;
@@ -1851,6 +2036,7 @@ class App {
         it('Plaquer contre une autre face', 'align', () => { this.startAlign(); this.alignClick(e); });
       }
       if (o.type === 'sheet') it('Développé à plat (DXF)', 'flat', () => this.flatDialog(o));
+      if (FAB.objectProfile(o, this.model, sheetFlat)) { it('Programme de découpe (G-code)', 'cnc', () => this.camDialog('laser')); it('Programme de fraisage (G-code)', 'cnc', () => this.camDialog('mill')); }
       if (o.type === 'sketch') { it('Modifier l\'esquisse', 'sketch', () => this.enterSketch(o)); it('Extruder', 'extrude', () => this.fromSketch('extrude', o)); }
       if (o.params?.sketch && this.model.get(o.params.sketch)) it('Modifier l\'esquisse', 'sketch', () => this.enterSketch(this.model.get(o.params.sketch)));
       sep();
@@ -1896,7 +2082,7 @@ class App {
   commandList() {
     const cmds = [];
     const saveTab = this.tab, saveMode = this.mode;
-    const tabs = { create: 'Créer', sheet: 'Chaudronnerie', modify: 'Modifier', tools: 'Outils', export: 'Plan & Export', help: 'Aide' };
+    const tabs = { create: 'Créer', sheet: 'Chaudronnerie', fab: 'Atelier', modify: 'Modifier', tools: 'Outils', export: 'Plan & Export', help: 'Aide' };
     if (this.mode === 'normal') {
       for (const [t, tl] of Object.entries(tabs)) {
         this.tab = t;
@@ -2233,7 +2419,7 @@ class App {
     const num = (v) => E('input', { type: 'text', inputmode: 'decimal', value: fmtIn(v) });
     const out = E('div', { class: 'calc-out' });
     const body = E('div', {});
-    const tabs = [['fit', 'Ajustements ISO'], ['bend', 'Pliage'], ['mass', 'Masse'], ['thread', 'Perçage / taraudage']];
+    const tabs = [['fit', 'Ajustements ISO'], ['cut', 'Usinage'], ['beam', 'Poutre (RDM)'], ['joint', 'Boulons / soudure'], ['trans', 'Transmission'], ['bearing', 'Roulements / ressorts'], ['fluid', 'Vérins / hydraulique'], ['bend', 'Pliage'], ['mass', 'Masse'], ['thread', 'Perçage / taraudage']];
     const head = E('div', { class: 'calc-tabs' }, ...tabs.map(([k, l]) => E('button', { class: k === tab ? 'on' : '', onclick: () => this.calcDialog(k) }, l)));
     const sel = (opts, v) => E('select', {}, ...opts.map((o) => E('option', { value: o, selected: o === v }, o)));
     const um = (v) => (Math.abs(v) < 1e-9 ? '0' : (v > 0 ? '+' : '') + fmt(v, 1)) + ' µm';
@@ -2287,6 +2473,124 @@ class App {
       sh.addEventListener('change', relabel); mat.addEventListener('change', calc);
       body.append(F('Forme', sh), F('Matériau', mat), fx, fy, fz);
       relabel();
+    } else if (tab === 'cut') {
+      const op = sel(['Fraisage', 'Perçage', 'Tournage'], 'Fraisage'), mat = sel(Object.keys(CUT_MATERIALS), 'Acier doux (S235, C35)'), tool = sel(['Carbure', 'Acier rapide (HSS)'], 'Carbure');
+      const D = num(10), z = num(3), f = num(0.15);
+      const calc = () => {
+        const m = CUT_MATERIALS[mat.value], d = evalNum(D.value) || 1, carb = tool.value === 'Carbure';
+        let vc = op.value === 'Tournage' ? (carb ? m.turn : m.hss * 1.2) : carb ? m.carb : m.hss;
+        if (op.value === 'Perçage') vc *= 0.7;
+        const N = (1000 * vc) / (Math.PI * d);
+        let vf, extra;
+        if (op.value === 'Fraisage') { const fz = fzFor(d, mat.value); vf = fz * (evalNum(z.value) || 1) * N; extra = `<tr><td>Avance par dent fz</td><td>${fmt(fz, 3)} mm/dent</td></tr>`; }
+        else if (op.value === 'Perçage') { const fr = Math.max(0.03, d * 0.015 * (/Aluminium|Plastiques/.test(mat.value) ? 1.5 : 1)); vf = fr * N; extra = `<tr><td>Avance par tour</td><td>${fmt(fr, 3)} mm/tr</td></tr>`; }
+        else { const fr = evalNum(f.value) || 0.1; vf = fr * N; extra = `<tr><td>Avance par tour</td><td>${fmt(fr, 3)} mm/tr</td></tr>`; }
+        out.innerHTML = `<table class="tbl"><tr><td>Vitesse de coupe Vc</td><td>${fmt(vc, 0)} m/min</td></tr><tr><td><b>Vitesse de rotation N</b></td><td><b>${fmt(N, 0)} tr/min</b></td></tr>${extra}<tr><td><b>Vitesse d'avance Vf</b></td><td><b>${fmt(vf, 0)} mm/min</b></td></tr></table><div class="note">Valeurs de départ indicatives (outil revêtu, arrosage). Ajustez selon le fabricant d'outil, la rigidité de la machine et l'état de surface visé.</div>`;
+        fz_.style.display = op.value === 'Fraisage' ? '' : 'none'; ff_.style.display = op.value === 'Tournage' ? '' : 'none';
+        fD_.firstChild.textContent = op.value === 'Tournage' ? 'Ø de la pièce' : 'Ø de l\'outil';
+      };
+      const fD_ = F('Ø de l\'outil', D, 'mm'), fz_ = F('Nombre de dents', z), ff_ = F('Avance par tour', f, 'mm/tr');
+      for (const i of [op, mat, tool, D, z, f]) { i.addEventListener('input', calc); i.addEventListener('change', calc); }
+      body.append(F('Opération', op), F('Matière usinée', mat), F('Outil', tool), fD_, fz_, ff_);
+      calc();
+    } else if (tab === 'beam') {
+      const fams = LIBRARY.filter((f) => /Profilés|Tuyauterie/.test(f.cat) && f.extra.some((x) => x.k === 'axis'));
+      const fam = sel(fams.map((f) => f.name), fams[0].name), size = E('select', {}), axis = sel(['Fort (hauteur verticale)', 'Faible'], 'Fort (hauteur verticale)');
+      const mat = sel(Object.keys(STEELS), 'Acier S235'), cas = sel(Object.keys(BEAM_CASES), Object.keys(BEAM_CASES)[0]);
+      const L = num(3000), Fk = num(5), q = num(0), lim = sel(['L/200', 'L/300', 'L/500'], 'L/300');
+      const pp = E('input', { type: 'checkbox', checked: true });
+      const fillSizes = () => { const f = fams.find((x) => x.name === fam.value); size.innerHTML = ''; for (const k of Object.keys(f.sizes)) size.append(E('option', { value: k, selected: k === f.defSize }, k)); };
+      const calc = () => {
+        const f = fams.find((x) => x.name === fam.value);
+        const g = this.model.baseGeometry({ type: 'part', params: { ...partDefaults(f, size.value), L: 10, axis: 'Z' } });
+        const s = sectionProps(g, 10), M_ = STEELS[mat.value];
+        const strong = axis.value.startsWith('Fort');
+        const I = strong ? s.Ix : s.Iy, v = strong ? s.vy : s.vx, W = I / v;
+        const Lm = evalNum(L.value) || 1, F_ = (evalNum(Fk.value) || 0) * 1000, qn = (evalNum(q.value) || 0) + (pp.checked ? (s.A * M_.rho * 9.81) / 1e6 : 0); // N/mm
+        const c = BEAM_CASES[cas.value];
+        const M = c.M(F_, qn, Lm), fl = c.f(F_, qn, Lm, M_.E * I), sig = M / W;
+        const flim = Lm / +lim.value.split('/')[1];
+        const okS = sig <= M_.fy, okF = fl <= flim;
+        out.innerHTML = `<table class="tbl">
+          <tr><td>Section A</td><td>${fmt(s.A / 100, 2)} cm²</td><td>Masse linéique</td><td>${fmt((s.A * M_.rho) / 1000, 2)} kg/m</td></tr>
+          <tr><td>Inertie I</td><td>${fmt(I / 1e4, 1)} cm⁴</td><td>Module W</td><td>${fmt(W / 1000, 1)} cm³</td></tr>
+          <tr><td>Moment maxi</td><td>${fmt(M / 1e6, 2)} kN·m</td><td>Charge répartie totale</td><td>${fmt(qn, 3)} kN/m</td></tr>
+          <tr><td><b>Contrainte maxi</b></td><td><b>${fmt(sig, 1)} MPa</b> / fy ${M_.fy}</td><td>${okS ? '✅' : '❌'} Taux</td><td><b>${fmt((100 * sig) / M_.fy, 0)} %</b></td></tr>
+          <tr><td><b>Flèche maxi</b></td><td><b>${fmt(fl, 2)} mm</b></td><td>${okF ? '✅' : '❌'} Limite ${lim.value}</td><td>${fmt(flim, 1)} mm</td></tr></table>
+          <div class="note">Vérification élastique simplifiée (sans déversement, flambement, ni coefficients de pondération). Section calculée sur la géométrie du profilé. Pour un ouvrage, faites valider par un bureau d'études.</div>`;
+      };
+      fam.addEventListener('change', () => { fillSizes(); calc(); });
+      for (const i of [size, axis, mat, cas, L, Fk, q, lim, pp]) { i.addEventListener('input', calc); i.addEventListener('change', calc); }
+      fillSizes();
+      body.append(F('Profilé', fam), F('Taille', size), F('Axe de flexion', axis), F('Matériau', mat), F('Cas de charge', cas), F('Portée L', L, 'mm'), F('Charge ponctuelle F', Fk, 'kN'), F('Charge répartie q', q, 'kN/m'), F('Poids propre inclus', pp), F('Flèche admissible', lim));
+      calc();
+    } else if (tab === 'joint') {
+      const size = sel(Object.keys(BOLT_AS), 'M12'), cls = sel(Object.keys(BOLT_CLASSES), '8.8'), n = num(4), pl = sel(['1', '2'], '1'), V = num(40), N = num(0);
+      const st = sel(Object.keys(STEELS).filter((k) => k.startsWith('Acier')), 'Acier S235'), a = num(4), Lw = num(100), Fw = num(50);
+      const res1 = E('div'), res2 = E('div');
+      const calc = () => {
+        const b = boltCheck({ size: size.value, cls: cls.value, n: Math.max(1, evalNum(n.value) || 1), planes: +pl.value, V: evalNum(V.value) || 0, N: evalNum(N.value) || 0 });
+        res1.innerHTML = `<table class="tbl"><tr><td>Résistance au cisaillement / boulon</td><td>${fmt(b.FvRd, 1)} kN</td><td>Effort par boulon</td><td>${fmt(b.Fv, 1)} kN</td></tr><tr><td>Résistance à la traction / boulon</td><td>${fmt(b.FtRd, 1)} kN</td><td>Effort par boulon</td><td>${fmt(b.Ft, 1)} kN</td></tr><tr><td><b>Taux d'utilisation</b></td><td colspan="3"><b>${b.ratio <= 1 && b.ratioT <= 1 ? '✅' : '❌'} ${fmt(b.ratio * 100, 0)} %</b> (cisaillement + traction combinés)</td></tr></table>`;
+        const w = weldCheck({ steel: st.value, a: evalNum(a.value) || 1, L: evalNum(Lw.value) || 1, F: evalNum(Fw.value) || 0 });
+        res2.innerHTML = `<table class="tbl"><tr><td>Résistance du cordon</td><td>${fmt(w.fvw, 0)} MPa</td><td>Effort admissible</td><td>${fmt(w.FwRd, 1)} kN</td></tr><tr><td><b>Taux d'utilisation</b></td><td colspan="3"><b>${w.ratio <= 1 ? '✅' : '❌'} ${fmt(w.ratio * 100, 0)} %</b></td></tr></table>`;
+      };
+      for (const i of [size, cls, n, pl, V, N, st, a, Lw, Fw]) { i.addEventListener('input', calc); i.addEventListener('change', calc); }
+      body.append(E('h4', {}, 'Assemblage boulonné (cisaillement / traction)'), F('Diamètre', size), F('Classe', cls), F('Nombre de boulons', n), F('Plans de cisaillement', pl), F('Effort tranchant total V', V, 'kN'), F('Effort de traction total N', N, 'kN'), res1,
+        E('h4', {}, 'Cordon de soudure d\'angle (méthode simplifiée)'), F('Acier', st), F('Gorge a', a, 'mm'), F('Longueur utile', Lw, 'mm'), F('Effort', Fw, 'kN'), res2,
+        E('div', { class: 'note' }, 'Méthodes simplifiées de l\'Eurocode 3 (EN 1993-1-8), γM2 = 1,25, valeurs de calcul (efforts déjà pondérés). La pression diamétrale et le poinçonnement ne sont pas vérifiés.'));
+      calc();
+    } else if (tab === 'trans') {
+      const D = num(200), d = num(100), C = num(500), N1 = num(1450);
+      const p = num(12.7), z1 = num(17), z2 = num(34), Cc = num(400);
+      const m = num(2), g1 = num(20), g2 = num(60);
+      const r1 = E('div'), r2 = E('div'), r3 = E('div');
+      const calc = () => {
+        const Dv = evalNum(D.value) || 1, dv = evalNum(d.value) || 1, Cv = evalNum(C.value) || 1, n1 = evalNum(N1.value) || 0;
+        r1.innerHTML = `<table class="tbl"><tr><td>Longueur primitive de courroie</td><td><b>${fmt(beltLength(Dv, dv, Cv), 0)} mm</b></td></tr><tr><td>Rapport</td><td>${fmt(Dv / dv, 3)}</td></tr><tr><td>Vitesse de la poulie menée</td><td>${fmt((n1 * dv) / Dv, 0)} tr/min</td></tr><tr><td>Vitesse linéaire de courroie</td><td>${fmt((Math.PI * dv * n1) / 60000, 2)} m/s</td></tr></table>`;
+        const ch = chainLinks(evalNum(p.value) || 1, evalNum(z1.value) || 1, evalNum(z2.value) || 1, evalNum(Cc.value) || 1);
+        r2.innerHTML = `<table class="tbl"><tr><td>Nombre de maillons (pair)</td><td><b>${ch.n}</b> (calcul ${fmt(ch.X, 2)})</td></tr><tr><td>Rapport</td><td>${fmt((evalNum(z2.value) || 1) / (evalNum(z1.value) || 1), 3)}</td></tr></table>`;
+        const mv = evalNum(m.value) || 1, a1 = evalNum(g1.value) || 1, a2 = evalNum(g2.value) || 1;
+        r3.innerHTML = `<table class="tbl"><tr><td>Entraxe</td><td><b>${fmt((mv * (a1 + a2)) / 2, 2)} mm</b></td></tr><tr><td>Rapport de réduction</td><td>${fmt(a2 / a1, 3)}</td></tr><tr><td>Ø primitifs</td><td>${fmt(mv * a1, 1)} / ${fmt(mv * a2, 1)} mm</td></tr></table>`;
+      };
+      for (const i of [D, d, C, N1, p, z1, z2, Cc, m, g1, g2]) i.addEventListener('input', calc);
+      body.append(E('h4', {}, 'Courroie (2 poulies)'), F('Ø grande poulie', D, 'mm'), F('Ø petite poulie (motrice)', d, 'mm'), F('Entraxe', C, 'mm'), F('Vitesse moteur', N1, 'tr/min'), r1,
+        E('h4', {}, 'Chaîne à rouleaux'), F('Pas (12,7 = 08B / ½")', p, 'mm'), F('Dents pignon', z1), F('Dents couronne', z2), F('Entraxe', Cc, 'mm'), r2,
+        E('h4', {}, 'Engrenages droits'), F('Module', m), F('Dents pignon', g1), F('Dents roue', g2), r3);
+      calc();
+    } else if (tab === 'bearing') {
+      const C = num(13.5), P = num(2), N = num(1500), typ = sel(['Billes', 'Rouleaux'], 'Billes');
+      const dw = num(2), De = num(20), na = num(8), gm = sel(Object.keys(SPRING_G), Object.keys(SPRING_G)[0]), fl = num(5);
+      const r1 = E('div'), r2 = E('div');
+      const calc = () => {
+        const b = bearingLife(evalNum(C.value) || 1, evalNum(P.value) || 1, evalNum(N.value) || 1, typ.value === 'Rouleaux');
+        r1.innerHTML = `<table class="tbl"><tr><td>Durée L10</td><td>${fmt(b.L10, 1)} millions de tours</td></tr><tr><td><b>Durée en heures</b></td><td><b>${fmt(b.hours, 0)} h</b> (≈ ${fmt(b.hours / 2000, 1)} ans à 8 h/jour)</td></tr></table><div class="note">C = charge dynamique de base du catalogue fabricant (ex. 6204 : C ≈ 13,5 kN). P = charge équivalente.</div>`;
+        const d = evalNum(dw.value) || 0.1, Dm = (evalNum(De.value) || 1) - d, n = evalNum(na.value) || 1;
+        const k = (SPRING_G[gm.value] * d ** 4) / (8 * Dm ** 3 * n);
+        const f = evalNum(fl.value) || 0, Fs = k * f, tau = (8 * Fs * Dm) / (Math.PI * d ** 3) * (1 + 0.5 * d / Dm);
+        r2.innerHTML = `<table class="tbl"><tr><td><b>Raideur k</b></td><td><b>${fmt(k, 2)} N/mm</b></td></tr><tr><td>Effort à ${fmt(f, 1)} mm</td><td>${fmt(Fs, 1)} N</td></tr><tr><td>Contrainte de torsion</td><td>${fmt(tau, 0)} MPa</td></tr></table>`;
+      };
+      for (const i of [C, P, N, typ, dw, De, na, gm, fl]) { i.addEventListener('input', calc); i.addEventListener('change', calc); }
+      body.append(E('h4', {}, 'Durée de vie d\'un roulement (ISO 281)'), F('Charge dynamique C', C, 'kN'), F('Charge équivalente P', P, 'kN'), F('Vitesse', N, 'tr/min'), F('Type', typ), r1,
+        E('h4', {}, 'Ressort de compression'), F('Ø du fil', dw, 'mm'), F('Ø extérieur', De, 'mm'), F('Spires actives', na), F('Matériau', gm), F('Flèche', fl, 'mm'), r2);
+      calc();
+    } else if (tab === 'fluid') {
+      const D = num(50), d = num(20), p = num(6), Q = num(20), c = num(200), cyc = num(10);
+      const r1 = E('div');
+      const calc = () => {
+        const Dv = evalNum(D.value) || 1, dv = Math.min(evalNum(d.value) || 0, Dv * 0.99), pv = evalNum(p.value) || 0, Qv = evalNum(Q.value) || 0, cv = evalNum(c.value) || 0;
+        const S = Math.PI * Dv * Dv / 4, S2 = S - Math.PI * dv * dv / 4;
+        const air = ((S + S2) * cv / 1e6) * (pv + 1.013); // litres normaux par cycle aller-retour
+        out.innerHTML = '';
+        r1.innerHTML = `<table class="tbl"><tr><td><b>Poussée (sortie)</b></td><td><b>${fmt(pv * 0.1 * S / 1000, 2)} kN</b> (${fmt(pv * 0.1 * S / 9.81, 0)} kg)</td></tr><tr><td><b>Traction (rentrée)</b></td><td><b>${fmt(pv * 0.1 * S2 / 1000, 2)} kN</b></td></tr>
+          <tr><td>Vitesse de sortie (hydraulique, débit Q)</td><td>${fmt((Qv * 1e6 / 60) / S / 1000, 3)} m/s</td></tr><tr><td>Vitesse de rentrée</td><td>${fmt((Qv * 1e6 / 60) / S2 / 1000, 3)} m/s</td></tr>
+          <tr><td>Puissance hydraulique p·Q</td><td>${fmt((pv * Qv) / 600, 2)} kW</td></tr>
+          <tr><td>Consommation d'air (pneumatique)</td><td>${fmt(air, 2)} NL/cycle — ${fmt(air * (evalNum(cyc.value) || 0), 1)} NL/min</td></tr></table>
+          <div class="note">Efforts théoriques (sans frottement : comptez 85 à 90 % en pratique). Consommation d'air en litres normaux pour un aller-retour.</div>`;
+      };
+      for (const i of [D, d, p, Q, c, cyc]) i.addEventListener('input', calc);
+      body.append(F('Alésage du vérin', D, 'mm'), F('Ø de la tige', d, 'mm'), F('Pression', p, 'bar'), F('Débit (hydraulique)', Q, 'L/min'), F('Course', c, 'mm'), F('Cycles par minute', cyc), r1,
+        E('div', { class: 'btnrow' }, E('button', { class: 'btn', onclick: () => { this.closeModal(); this.libSearch('vérin'); } }, 'Vérins ISO 15552 au catalogue'), E('button', { class: 'btn', onclick: () => { this.closeModal(); this.libSearch('moteur'); } }, 'Moteurs IEC au catalogue')));
+      calc();
     } else {
       const rows = Object.entries(THREADS).map(([k, v]) => `<tr><td><b>${k}</b></td><td>${fmt(v[0], 2)}</td><td>${fmt(v[1], 1)}</td><td>${fmt(v[2], 1)}</td><td>${fmt(v[3], 1)} × ${fmt(v[4], 1)}</td><td>${v[5]}</td></tr>`).join('');
       out.innerHTML = `<table class="tbl"><tr><th>Filet</th><th>Pas</th><th>Ø foret taraudage</th><th>Ø passage (moyen)</th><th>Lamage CHC Ø × prof.</th><th>Couple 8.8 (N·m)*</th></tr>${rows}</table><div class="note">* Couple de serrage indicatif pour vis classe 8.8, frottement µ ≈ 0,14 (lubrification légère). Vérifiez selon votre application.</div>`;

@@ -31,6 +31,11 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 | **Chaudronnerie** | Générateurs 3D paramétriques avec **développé à plat exact** (fibre neutre) : **virole**, **tronc de cône** droit ou excentré, **coude segmenté**, **piquage** tube sur tube (avec excentration et découpe du tube principal), **transitions carré-rond et rectangle-rectangle** (centrées ou décalées) ; surface, masse du flan, lignes de pliage / roulage ; export **DXF** (calques CONTOUR, PLIAGE, AXE, TEXTE), SVG, PDF, ou conversion en esquisse |
 | **Tôlerie** | **Tôle pliée** (U, L, Z, cornière… saisie « 40;90;80;90;40 »), rayon intérieur, **facteur K**, longueur développée et lignes de pli avec sens et angle |
 | **Tuyauterie** | Brides plates PN16 (EN 1092-1), coudes 3D 45/90/180° (EN 10253), tubes EN 10220 DN15 à DN300, fonds bombés GRC (Klöpper) et elliptiques |
+| **Atelier – découpe** | **G-code** laser, plasma et oxycoupage avec compensation de saignée, amorçages dans la chute, trous avant contour ; **imbrication** des pièces sur la tôle (formats standards ou personnalisés), taux de chute, DXF de la tôle et G-code de la tôle |
+| **Atelier – usinage** | **G-code de fraisage 2D** (contournage compensé, passes, perçages G81 automatiques) ; **conditions de coupe** (Vc, N, Vf) en fraisage, perçage et tournage |
+| **Structure / charpente** | **Calcul de poutre** (flèche, contrainte, taux de travail) avec les vraies sections du catalogue (IPE, HEA, HEB, UPN, tubes, alu…) ; **boulons et cordons de soudure** (Eurocode 3 simplifié) |
+| **Transmission / maintenance** | Courroies, chaînes (nombre de maillons), engrenages, **durée de vie des roulements (L10)**, raideur des ressorts, ajustements ISO |
+| **Pneumatique / hydraulique** | Effort et vitesse des **vérins**, consommation d'air, puissance hydraulique ; **vérins ISO 15552** et **moteurs IEC** au catalogue |
 | **Booléens** | Soustraction, union, intersection, modifiables à tout moment depuis l'arbre |
 | **Modifier** | Poignées de déplacement et de rotation (avec pas), coordonnées numériques, poser au sol, dupliquer, **répétitions linéaires et circulaires**, figer |
 | **Catalogue** | Brides, coudes, tubes, fonds bombés, vis CHC, H, FHC, BHC, sans tête, tiges filetées, écrous, écrous Nylstop, rondelles plates et larges, roulements 60xx / 62xx / 63xx / miniatures, goupilles, clavettes, **engrenages à développante**, ressorts, poutrelles IPE / HEA / HEB / UPN, cornières, tubes, plats, ronds, **profilés aluminium rainurés** |
@@ -114,5 +119,5 @@ src/
 
 ## Licences
 
-FormaCAD est sous licence MIT. Il utilise three.js, three-bvh-csg, three-mesh-bvh (MIT) et occt-import-js /
+FormaCAD est sous licence MIT. Il utilise three.js, three-bvh-csg, three-mesh-bvh, SDK Anthropic (MIT), clipper-lib (Boost) et occt-import-js /
 Open CASCADE Technology (LGPL 2.1) — textes de licence dans [`release/`](release/).

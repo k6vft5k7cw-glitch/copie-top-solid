@@ -87,6 +87,11 @@ const P = {
   para: 'M5 19L15 5 M9 19L19 5',
   perp: 'M5 19h14 M12 19V5 M12 15h4v4',
   equal: 'M5 9h14 M5 15h14',
+  cnc: 'M3 20h18 M6 20V9h12v11 M12 9V4 M10 4h4 M9 14h6',
+  nest: 'M3 4h18v16H3z M6 7h5v4H6z M13 7h5v6h-5z M6 13h5v4H6z',
+  beam2: 'M3 9h18 M3 13h18 M5 9v4 M19 9v4 M12 4v5 M10 7l2 2 2-2',
+  cylinder2: 'M3 9h12v6H3z M15 11h6v2h-6z M6 9V7 M12 9V7',
+  motor: 'M4 7h12v10H4z M16 11h5v2h-5z M6 17v3 M14 17v3 M4 20h12',
   detach: 'M8 8h8v8H8z M3 3l4 4 M21 21l-4-4',
 };
 
@@ -110,5 +115,7 @@ export const FAMILY_ICON = (fam) => {
   if (fam.id === 'en10253') return 'elbow';
   if (fam.id === 'en1092') return 'plate';
   if (fam.cat.startsWith('Tuyauterie')) return 'tube';
+  if (fam.id === 'iso15552') return 'cylinder2';
+  if (fam.id === 'iec') return 'motor';
   return 'part';
 };

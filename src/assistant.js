@@ -35,6 +35,7 @@ ${fams}
 - Perçage : add_hole sur un solide, position dans le repère de ce solide (le dessus d'un bloc de hauteur h est à z=h), le trou va vers -Z. Passages : M3 3,4 / M4 4,5 / M5 5,5 / M6 6,6 / M8 9 / M10 11 / M12 13,5 / M16 17,5 ; taraudages : M6 5 / M8 6,8 / M10 8,5 / M12 10,2. Lamage CHC M8 : D2=15 h2=8,6.
 - Esquisse + extrusion : sketch_extrude avec des entités 2D : {type:"rect",x,y,w,h} (x,y = coin), {type:"circle",c:[x,y],r}, {type:"line",a:[x,y],b:[x,y]}, {type:"arc",c,r,a0,a1 (degrés, sens trigo)}, {type:"polygon",c,r,n,rot}, {type:"slot",a,b,r}. Un contour fermé inclus dans un autre devient un trou.
 Matériaux disponibles : ${Object.keys(MATERIALS).join(', ')}.
+Le logiciel couvre aussi l'atelier : G-code de découpe (laser, plasma, oxycoupage) et de fraisage, imbrication sur tôle, calcul de poutre (RDM), boulons et soudures (Eurocode 3), transmission, roulements, ressorts, vérins et hydraulique, conditions de coupe : ouvre l'outil adapté avec show quand c'est utile, et réponds aux questions techniques de tous les métiers de la mécanique industrielle (usinage, chaudronnerie, soudure, maintenance, charpente, hydraulique, pneumatique).
 Commence par get_project si tu as besoin de connaître le projet. Ne supprime rien sans demande explicite.`;
 }
 
@@ -162,8 +163,8 @@ export class Assistant {
         },
       },
       {
-        name: 'show', description: 'Affiche quelque chose à l\'utilisateur : what = fit (tout afficher), iso, front, top, right, flat (développé d\'une tôle, id requis), drawing (mise en plan), bom (nomenclature), calc (calculateurs).',
-        inputSchema: { type: 'object', properties: { what: { type: 'string' }, id: { type: 'number' } }, required: ['what'] },
+        name: 'show', description: 'Affiche quelque chose à l\'utilisateur : what = fit (tout afficher), iso, front, top, right, flat (développé d\'une tôle, id requis), drawing (mise en plan), bom (nomenclature), calc (calculateurs ; tab = fit|cut|beam|joint|trans|bearing|fluid|bend|mass|thread), cam (G-code de découpe ; id de la pièce), mill (G-code de fraisage ; id), nest (imbrication sur tôle).',
+        inputSchema: { type: 'object', properties: { what: { type: 'string' }, id: { type: 'number' }, tab: { type: 'string' } }, required: ['what'] },
         execute: (i) => {
           const w = String(i.what);
           if (w === 'fit') app.fitView();
@@ -171,7 +172,9 @@ export class Assistant {
           else if (w === 'flat') { const o = M.get(Number(i.id)); if (!o || o.type !== 'sheet') throw new Error('id de tôle requis'); this.after = () => app.flatDialog(o); }
           else if (w === 'drawing') this.after = () => app.drawingDialog();
           else if (w === 'bom') this.after = () => app.bomDialog();
-          else if (w === 'calc') this.after = () => app.calcDialog();
+          else if (w === 'calc') this.after = () => app.calcDialog(i.tab || 'fit');
+          else if (w === 'cam' || w === 'mill') { if (i.id) app.selection = [Number(i.id)]; this.after = () => app.camDialog(w === 'mill' ? 'mill' : 'laser'); }
+          else if (w === 'nest') this.after = () => app.nestDialog();
           return 'ok';
         },
       },

@@ -86,3 +86,89 @@ export const THREADS = {
   M8: [1.25, 6.8, 9, 15, 8.6, 25], M10: [1.5, 8.5, 11, 18, 10.8, 49], M12: [1.75, 10.2, 13.5, 20, 13, 85], M14: [2, 12, 15.5, 24, 15, 135],
   M16: [2, 14, 17.5, 26, 17.5, 210], M20: [2.5, 17.5, 22, 33, 21.5, 410], M24: [3, 21, 26, 40, 25.5, 710],
 };
+
+// ------------------------------------------------------------------ USINAGE : conditions de coupe indicatives (m/min)
+export const CUT_MATERIALS = {
+  'Acier doux (S235, C35)': { hss: 30, carb: 180, turn: 200 },
+  'Acier allié / traité (42CrMo4)': { hss: 20, carb: 120, turn: 150 },
+  'Acier inoxydable (304, 316)': { hss: 15, carb: 100, turn: 130 },
+  'Fonte grise': { hss: 20, carb: 150, turn: 160 },
+  'Aluminium': { hss: 100, carb: 400, turn: 500 },
+  'Laiton / bronze': { hss: 60, carb: 250, turn: 250 },
+  'Titane': { hss: 8, carb: 50, turn: 60 },
+  'Plastiques (POM, PA, PEHD)': { hss: 80, carb: 300, turn: 300 },
+};
+/** avance par dent indicative (mm/dent) selon Ø fraise */
+export const fzFor = (D, mat) => {
+  const base = D <= 4 ? 0.02 : D <= 8 ? 0.04 : D <= 12 ? 0.06 : D <= 20 ? 0.08 : 0.1;
+  return /Aluminium|Plastiques/.test(mat) ? base * 1.6 : /inox|Titane/.test(mat) ? base * 0.7 : base;
+};
+
+// ------------------------------------------------------------------ RDM : poutres (formules classiques)
+export const BEAM_CASES = {
+  'Sur 2 appuis – charge au centre': { M: (F, q, L) => F * L / 4 + q * L * L / 8, f: (F, q, L, EI) => F * L ** 3 / (48 * EI) + 5 * q * L ** 4 / (384 * EI) },
+  'Console (encastrée) – charge en bout': { M: (F, q, L) => F * L + q * L * L / 2, f: (F, q, L, EI) => F * L ** 3 / (3 * EI) + q * L ** 4 / (8 * EI) },
+  'Bi-encastrée – charge au centre': { M: (F, q, L) => F * L / 8 + q * L * L / 12, f: (F, q, L, EI) => F * L ** 3 / (192 * EI) + q * L ** 4 / (384 * EI) },
+};
+export const STEELS = {
+  'Acier S235': { E: 210000, fy: 235, fu: 360, bw: 0.8, rho: 7.85 },
+  'Acier S275': { E: 210000, fy: 275, fu: 430, bw: 0.85, rho: 7.85 },
+  'Acier S355': { E: 210000, fy: 355, fu: 490, bw: 0.9, rho: 7.85 },
+  'Inox 304L': { E: 200000, fy: 220, fu: 520, bw: 0.8, rho: 7.9 },
+  'Aluminium 6060 T6': { E: 69000, fy: 150, fu: 190, bw: 0.8, rho: 2.7 },
+  'Aluminium 6082 T6': { E: 70000, fy: 250, fu: 290, bw: 0.8, rho: 2.7 },
+};
+
+/** Propriétés d'une section (géométrie extrudée de longueur Lz selon Z) : A, Ix, Iy (/centre de gravité), vmax */
+export function sectionProps(geom, Lz) {
+  const p = geom.getAttribute('position').array;
+  let V = 0, Sx = 0, Sy = 0, Sxx = 0, Syy = 0;
+  for (let i = 0; i < p.length; i += 9) {
+    const a = [p[i], p[i + 1], p[i + 2]], b = [p[i + 3], p[i + 4], p[i + 5]], c = [p[i + 6], p[i + 7], p[i + 8]];
+    const v = (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    V += v;
+    Sx += v * (a[0] + b[0] + c[0]) / 4; Sy += v * (a[1] + b[1] + c[1]) / 4;
+    const sq = (k) => a[k] * a[k] + b[k] * b[k] + c[k] * c[k] + a[k] * b[k] + a[k] * c[k] + b[k] * c[k];
+    Sxx += v * sq(0) / 10; Syy += v * sq(1) / 10;
+  }
+  const s = Math.sign(V) || 1;
+  V *= s; Sx *= s; Sy *= s; Sxx *= s; Syy *= s;
+  const cx = Sx / V, cy = Sy / V;
+  geom.computeBoundingBox();
+  const bb = geom.boundingBox;
+  return {
+    A: V / Lz,
+    Ix: (Syy - V * cy * cy) / Lz, // flexion autour de X (fibres en Y)
+    Iy: (Sxx - V * cx * cx) / Lz,
+    vy: Math.max(bb.max.y - cy, cy - bb.min.y),
+    vx: Math.max(bb.max.x - cx, cx - bb.min.x),
+  };
+}
+
+// ------------------------------------------------------------------ ASSEMBLAGES (EN 1993-1-8, méthode simplifiée)
+export const BOLT_AS = { M8: 36.6, M10: 58, M12: 84.3, M14: 115, M16: 157, M20: 245, M22: 303, M24: 353, M27: 459, M30: 561 };
+export const BOLT_CLASSES = { '4.6': { fub: 400, av: 0.6 }, '5.6': { fub: 500, av: 0.6 }, '8.8': { fub: 800, av: 0.6 }, '10.9': { fub: 1000, av: 0.5 } };
+export const GM2 = 1.25;
+export function boltCheck({ size, cls, n, planes, V, N }) {
+  const As = BOLT_AS[size], c = BOLT_CLASSES[cls];
+  const FvRd = (c.av * c.fub * As) / GM2 / 1000 * planes; // kN par boulon
+  const FtRd = (0.9 * c.fub * As) / GM2 / 1000;
+  const Fv = V / n, Ft = N / n;
+  return { FvRd, FtRd, Fv, Ft, ratio: Fv / FvRd + Ft / (1.4 * FtRd), ratioT: Ft / FtRd };
+}
+export function weldCheck({ steel, a, L, F }) {
+  const s = STEELS[steel];
+  const fvw = s.fu / (Math.sqrt(3) * s.bw * GM2);
+  const FwRd = fvw * a * L / 1000; // kN
+  return { fvw, FwRd, ratio: F / FwRd };
+}
+
+// ------------------------------------------------------------------ TRANSMISSION
+export const beltLength = (D, d, C) => 2 * C + Math.PI * (D + d) / 2 + (D - d) ** 2 / (4 * C);
+export function chainLinks(p, z1, z2, C) {
+  const X = 2 * C / p + (z1 + z2) / 2 + p * (z2 - z1) ** 2 / (4 * Math.PI ** 2 * C);
+  let n = Math.ceil(X); if (n % 2) n++;
+  return { X, n };
+}
+export const SPRING_G = { 'Acier à ressort (C, 1.1200)': 81500, 'Inox (1.4310)': 70000, 'Bronze phosphoreux': 41000 };
+export const bearingLife = (C, P, N, roller) => { const L10 = (C / P) ** (roller ? 10 / 3 : 3); return { L10, hours: (L10 * 1e6) / (60 * N) }; };
