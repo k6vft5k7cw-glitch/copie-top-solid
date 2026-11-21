@@ -6,13 +6,17 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 
 ---
 
-## 🚀 Utilisation immédiate (aucune installation)
+## 🚀 Télécharger et utiliser
 
-1. Téléchargez **[`release/FormaCAD.html`](release/FormaCAD.html)** (bouton *Download raw file* sur GitHub).
-2. Double-cliquez dessus : il s'ouvre dans votre navigateur (Chrome, Edge, Firefox).
-3. C'est tout. **Tout fonctionne hors ligne**, y compris l'import STEP.
+**[⬇ Télécharger FormaCAD (.zip)](https://github.com/k6vft5k7cw-glitch/copie-top-solid/raw/main/release/FormaCAD.zip)**, environ 5 Mo, pour Windows, Mac et Linux.
 
-> Vos projets s'enregistrent en fichiers `.fcad` (Ctrl+S) et une sauvegarde automatique est faite dans le navigateur.
+1. Faites un clic droit sur `FormaCAD.zip`, puis **Extraire tout**.
+2. Double-cliquez sur **`FormaCAD.html`** : il s'ouvre dans votre navigateur (Chrome, Edge ou Firefox).
+3. Rien à installer. **Tout fonctionne hors ligne**, y compris l'import STEP. Seul l'assistant IA a besoin d'internet et d'une clé API Anthropic.
+
+**Version en ligne**, sans téléchargement : https://k6vft5k7cw-glitch.github.io/copie-top-solid/ (une fois GitHub Pages activé, voir plus bas).
+
+> Vos projets s'enregistrent en fichiers `.fcad` (Ctrl+S). Une sauvegarde automatique est aussi faite dans le navigateur.
 
 ---
 
@@ -69,6 +73,12 @@ chiffres + `Entrée` pour saisir une cote, `Maj` maintenue pour désactiver l'ai
 **Souris** : clic gauche = sélectionner, glisser gauche = tourner, glisser droit ou molette = déplacer, molette = zoom.
 
 ---
+
+## 🌐 Publier le site de téléchargement (GitHub Pages)
+
+Le dossier `docs/` contient une page d'accueil (`index.html`), l'application en ligne (`app.html`) et le `.zip`.
+Pour l'activer : **Settings → Pages → Source : Deploy from a branch → Branch : `main`, dossier `/docs` → Save**.
+Le site est ensuite disponible à l'adresse `https://k6vft5k7cw-glitch.github.io/copie-top-solid/`.
 
 ## 🛠️ Pour les développeurs
 

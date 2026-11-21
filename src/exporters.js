@@ -533,26 +533,80 @@ export function toSTEP(bodies, filename = 'formacad.step') {
   const ax = E(`AXIS2_PLACEMENT_3D('',#${origin},#${dz},#${dx})`);
   const items = [];
   const nf = (v) => { const s = (Math.abs(v) < 1e-12 ? 0 : v).toPrecision(10); return s.includes('.') || s.includes('e') ? s.replace('e', 'E') : s + '.'; };
+  const dirCache = new Map();
+  const dirE = (v) => { const k = `${nf(v.x)},${nf(v.y)},${nf(v.z)}`; let d = dirCache.get(k); if (!d) { d = E(`DIRECTION('',(${k}))`); dirCache.set(k, d); } return d; };
   for (const b of bodies) {
     const g = mergeVertices(b.geom.clone().deleteAttribute('normal'), 1e-5);
     const p = g.getAttribute('position'), idx = g.index.array;
-    const pid = new Array(p.count);
-    for (let i = 0; i < p.count; i++) pid[i] = E(`CARTESIAN_POINT('',(${nf(p.getX(i))},${nf(p.getY(i))},${nf(p.getZ(i))}))`);
-    const faces = [];
-    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    const P = (i) => new THREE.Vector3().fromBufferAttribute(p, i);
+    // triangles valides + normale
+    const tris = [];
     for (let t = 0; t < idx.length; t += 3) {
       const [i0, i1, i2] = [idx[t], idx[t + 1], idx[t + 2]];
       if (i0 === i1 || i1 === i2 || i0 === i2) continue;
-      A.fromBufferAttribute(p, i0); B.fromBufferAttribute(p, i1); C.fromBufferAttribute(p, i2);
-      if (B.clone().sub(A).cross(C.clone().sub(A)).lengthSq() < 1e-14) continue;
-      const nrm = B.clone().sub(A).cross(C.clone().sub(A)).normalize();
-      const ref = B.clone().sub(A).normalize();
-      const dn = E(`DIRECTION('',(${nf(nrm.x)},${nf(nrm.y)},${nf(nrm.z)}))`);
-      const dr = E(`DIRECTION('',(${nf(ref.x)},${nf(ref.y)},${nf(ref.z)}))`);
-      const pl = E(`PLANE('',#${E(`AXIS2_PLACEMENT_3D('',#${pid[i0]},#${dn},#${dr})`)})`);
-      const loop = E(`POLY_LOOP('',(#${pid[i0]},#${pid[i1]},#${pid[i2]}))`);
-      const bound = E(`FACE_OUTER_BOUND('',#${loop},.T.)`);
-      faces.push(E(`FACE_SURFACE('',(#${bound}),#${pl},.T.)`));
+      const A = P(i0), n = P(i1).sub(A).cross(P(i2).sub(A));
+      if (n.lengthSq() < 1e-14) continue;
+      n.normalize();
+      tris.push({ v: [i0, i1, i2], n, d: n.dot(A) });
+    }
+    // regroupe les triangles coplanaires voisins (union-find sur les arêtes partagées)
+    const parent = tris.map((_, i) => i);
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const edgeOwner = new Map();
+    tris.forEach((t, ti) => {
+      for (let k = 0; k < 3; k++) {
+        const a = t.v[k], c = t.v[(k + 1) % 3];
+        const key = a < c ? a + '_' + c : c + '_' + a;
+        const o = edgeOwner.get(key);
+        if (o === undefined) edgeOwner.set(key, ti);
+        else if (o >= 0) {
+          const u = tris[o];
+          if (u.n.dot(t.n) > 0.999999 && Math.abs(u.d - t.d) < 1e-4) parent[find(ti)] = find(o);
+          edgeOwner.set(key, -1);
+        }
+      }
+    });
+    const groups = new Map();
+    tris.forEach((t, ti) => { const r = find(ti); (groups.get(r) || groups.set(r, []).get(r)).push(t); });
+    const pid = new Map();
+    const pt = (i) => { let e = pid.get(i); if (!e) { e = E(`CARTESIAN_POINT('',(${nf(p.getX(i))},${nf(p.getY(i))},${nf(p.getZ(i))}))`); pid.set(i, e); } return e; };
+    const faces = [];
+    const triFace = (t) => {
+      const pl = E(`PLANE('',#${E(`AXIS2_PLACEMENT_3D('',#${pt(t.v[0])},#${dirE(t.n)},$)`)})`);
+      const loop = E(`POLY_LOOP('',(${t.v.map((i) => '#' + pt(i)).join(',')}))`);
+      faces.push(E(`FACE_SURFACE('',(#${E(`FACE_OUTER_BOUND('',#${loop},.T.)`)}),#${pl},.T.)`));
+    };
+    for (const grp of groups.values()) {
+      if (grp.length === 1) { triFace(grp[0]); continue; }
+      // contour : arêtes orientées qui n'apparaissent qu'une fois dans le groupe
+      const cnt = new Map();
+      for (const t of grp) for (let k = 0; k < 3; k++) { const a = t.v[k], c = t.v[(k + 1) % 3]; const key = a < c ? a + '_' + c : c + '_' + a; cnt.set(key, (cnt.get(key) || 0) + 1); }
+      const next = new Map();
+      let multi = false;
+      for (const t of grp) for (let k = 0; k < 3; k++) {
+        const a = t.v[k], c = t.v[(k + 1) % 3]; const key = a < c ? a + '_' + c : c + '_' + a;
+        if (cnt.get(key) === 1) { if (next.has(a)) multi = true; next.set(a, c); }
+      }
+      const loops = [];
+      const seen = new Set();
+      let fail = multi;
+      for (const s0 of next.keys()) {
+        if (fail || seen.has(s0)) continue;
+        const loop = [s0]; seen.add(s0);
+        let cur = next.get(s0), guard = 0;
+        while (cur !== s0) { if (cur === undefined || seen.has(cur) || ++guard > 1e6) { fail = true; break; } loop.push(cur); seen.add(cur); cur = next.get(cur); }
+        // retire les points alignés (jonctions en T)
+        if (!fail) loops.push(loop);
+      }
+      if (fail || !loops.length) { grp.forEach(triFace); continue; }
+      const n = grp[0].n;
+      const area = (lp) => { let s2 = 0; for (let i = 0; i < lp.length; i++) { const a = P(lp[i]), c = P(lp[(i + 1) % lp.length]); s2 += a.clone().cross(c).dot(n); } return s2 / 2; };
+      const areas = loops.map(area);
+      const oi = areas.indexOf(Math.max(...areas));
+      if (areas[oi] <= 0 || loops.some((lp) => lp.length < 3) || loops.length > 1) { grp.forEach(triFace); continue; } // faces percées : triangles (plus robuste à la relecture)
+      const pl = E(`PLANE('',#${E(`AXIS2_PLACEMENT_3D('',#${pt(loops[oi][0])},#${dirE(n)},$)`)})`);
+      const bounds = loops.map((lp, i) => E(`${i === oi ? 'FACE_OUTER_BOUND' : 'FACE_BOUND'}('',#${E(`POLY_LOOP('',(${lp.map((v) => '#' + pt(v)).join(',')}))`)},.T.)`));
+      faces.push(E(`FACE_SURFACE('',(${bounds.map((x) => '#' + x).join(',')}),#${pl},.T.)`));
     }
     const shell = E(`CLOSED_SHELL('',(${faces.map((x) => '#' + x).join(',')}))`);
     items.push({ brep: E(`FACETED_BREP('${stepStr(b.name)}',#${shell})`), name: b.name });

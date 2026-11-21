@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FormaCAD</title>
+<meta name="description" content="FormaCAD : logiciel de CAO 3D gratuit et simple, en français. Mécanique, chaudronnerie, tôlerie. Export DXF, STEP, STL.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7z' fill='%231565c0'/%3E%3C/svg%3E">
+<style>
+:root { --bg: #f4f7fb; --card: #fff; --text: #1d2733; --muted: #5b6b80; --accent: #1565c0; --line: #dfe6ee; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #14181e; --card: #1e242c; --text: #e6ebf1; --muted: #9aa8b9; --accent: #64a8f0; --line: #2f3743; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 16px 64px; }
+header { display: flex; align-items: center; gap: 12px; }
+.logo { width: 40px; height: 40px; background: var(--accent); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+h1 { font-size: 40px; margin: 0; }
+.lead { font-size: 20px; color: var(--muted); margin: 12px 0 28px; max-width: 720px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 40px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 14px 22px; border-radius: 12px; font-weight: 700; text-decoration: none; border: 2px solid var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.secondary { color: var(--accent); background: transparent; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+h2 { margin: 44px 0 14px; }
+ol { padding-left: 22px; }
+li { margin: 6px 0; }
+code { background: var(--card); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; }
+footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header><span class="logo"></span><h1>FormaCAD</h1></header>
+  <p class="lead">Un logiciel de CAO 3D gratuit, en français et simple à prendre en main : mécanique, chaudronnerie, tôlerie, plans et exports pour l'atelier.</p>
+  <div class="cta">
+    <a class="btn primary" href="app.html">▶ Utiliser en ligne</a>
+    <a class="btn secondary" href="FormaCAD.zip" download>⬇ Télécharger pour Windows, Mac, Linux (.zip)</a>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>✏️ Esquisse et volumes</h3><p>Esquisse 2D avec cotes au clavier, congés, contraintes ; extrusion, poche, révolution, perçages lamés et fraisés.</p></div>
+    <div class="card"><h3>🔩 Catalogue normalisé</h3><p>Vis, écrous, roulements, engrenages, profilés acier et alu, brides, coudes, fonds bombés : plus de 300 composants.</p></div>
+    <div class="card"><h3>🛠 Chaudronnerie et tôlerie</h3><p>Viroles, cônes, coudes segmentés, piquages, carré-rond, tôles pliées, avec leur développé exact en DXF.</p></div>
+    <div class="card"><h3>📐 Plans professionnels</h3><p>Formats A4 à A0, échelle automatique, cartouche, nomenclature, lignes cachées, symboles de soudure.</p></div>
+    <div class="card"><h3>📤 Tous les formats</h3><p>DXF, STEP, STL, OBJ, GLB, PLY, SVG, PDF, CSV ; import STEP, IGES, STL, OBJ, glTF, DXF.</p></div>
+    <div class="card"><h3>✨ Assistant IA</h3><p>Décrivez votre pièce en français, l'assistant la construit (clé API Anthropic requise pour la version téléchargée).</p></div>
+  </div>
+
+  <h2>Installer la version téléchargée</h2>
+  <ol>
+    <li>Cliquez sur <b>Télécharger</b> ci-dessus.</li>
+    <li>Faites un clic droit sur <code>FormaCAD.zip</code>, puis <b>Extraire tout</b>.</li>
+    <li>Double-cliquez sur <code>FormaCAD.html</code> : le logiciel s'ouvre dans votre navigateur (Chrome, Edge ou Firefox). Aucune installation, fonctionne sans internet.</li>
+  </ol>
+
+  <footer>FormaCAD est un logiciel libre (licence MIT). Composants tiers : three.js, three-bvh-csg, three-mesh-bvh (MIT), Open CASCADE / occt-import-js (LGPL 2.1), SDK Anthropic (MIT).</footer>
+</main>
+</body>
+</html>

@@ -1919,6 +1919,7 @@ class App {
     const cmds = this.commandList();
     const norm = (t) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const idx = cmds.map((c) => norm(`${c.label} ${c.group} ${c.kw}`));
+    const labs = cmds.map((c) => norm(c.label));
     const input = E('input', { type: 'text', placeholder: 'Que voulez-vous faire ? (ex. : coude, bride DN100, percer, développé, M8…)' });
     const list = E('div', { class: 'pal-list' });
     const wrap = E('div', { id: 'palette' }, E('div', { class: 'pal-box' }, input, list));
@@ -1927,9 +1928,20 @@ class App {
     const run = (c) => { close(); c.fn(); };
     const render = () => {
       const terms = norm(input.value).split(/\s+/).filter(Boolean);
-      shown = [];
-      for (let i = 0; i < cmds.length && shown.length < 14; i++) if (terms.every((t) => idx[i].includes(t))) shown.push(cmds[i]);
-      if (!terms.length) shown = shown.filter((c) => !c.group.startsWith('Catalogue')).slice(0, 14);
+      const q = terms.join(' ');
+      const scored = [];
+      for (let i = 0; i < cmds.length; i++) {
+        if (!terms.every((t) => idx[i].includes(t))) continue;
+        const lab = labs[i];
+        let sc = 0;
+        if (lab === q) sc = 100; else if (lab.startsWith(q)) sc = 60; else if (terms.every((t) => lab.includes(t))) sc = 40;
+        if (cmds[i].group.startsWith('Catalogue')) sc -= 5;
+        scored.push([sc, i]);
+      }
+      scored.sort((x, y) => y[0] - x[0] || x[1] - y[1]);
+      shown = scored.map(([, i]) => cmds[i]);
+      if (!terms.length) shown = shown.filter((c) => !c.group.startsWith('Catalogue'));
+      shown = shown.slice(0, 14);
       sel = Math.min(sel, Math.max(0, shown.length - 1));
       list.innerHTML = '';
       shown.forEach((c, i) => list.append(E('button', { class: i === sel ? 'on' : '', onclick: () => run(c), onmousemove: () => { if (sel !== i) { sel = i; render(); } }, html: icon(c.ic, 18) + `<span>${esc(c.label)}</span><small>${esc(c.group)}</small>` })));
@@ -2426,20 +2438,41 @@ class App {
     }
   }
 
-  exportBodies() {
+  exportBodies(opts = {}) {
     const ids = this.selection.length ? this.selObjs().filter((o) => !o.role && this.model.isSolid(o)).map((o) => o.id) : null;
-    const b = this.model.worldBodies(ids && ids.length ? ids : null);
+    const b = this.model.worldBodies(ids && ids.length ? ids : null, opts);
     if (!b.length) this.toast('Rien à exporter : aucun solide visible', true);
     return b;
   }
 
   async export3D(fmtName) {
-    const b = this.exportBodies();
+    const b = this.exportBodies({ simplifyThreads: fmtName === 'step' });
     if (!b.length) return;
     const n = safeName(this.selection.length === 1 ? this.model.displayName(this.selObjs()[0]) : this.docName);
     try {
       switch (fmtName) {
-        case 'step': download(EX.toSTEP(b, n + '.step'), n + '.step', 'application/step'); break;
+        case 'step': {
+          const txt = EX.toSTEP(b, n + '.step');
+          if (txt.length > 8e6 && b.length > 1) {
+            // très gros fichier : proposer un STEP par pièce (plus fiable pour tous les logiciels)
+            const one = async () => {
+              const { zipSync, strToU8 } = await import('three/addons/libs/fflate.module.js');
+              const files = {}, used = new Map();
+              for (const body of b) { let base = safeName(body.name); const k = used.get(base) || 0; used.set(base, k + 1); if (k) base += '_' + (k + 1); files[base + '.step'] = strToU8(EX.toSTEP([body], base + '.step')); }
+              download(new Blob([zipSync(files)]), n + '_STEP_par_piece.zip', 'application/zip');
+              this.closeModal();
+            };
+            this.modal(E('div', { style: 'max-width:520px' }, E('h2', { html: icon('export', 22) + 'Export STEP volumineux' }),
+              E('p', {}, `L'assemblage fait ${fmt(txt.length / 1e6, 1)} Mo en STEP (${b.length} pièces). Au-delà d'environ 10 Mo, certains logiciels (dont FormaCAD lui-même) peuvent ne pas le relire.`),
+              E('div', { class: 'actions' },
+                E('button', { class: 'btn', onclick: () => { download(txt, n + '.step', 'application/step'); this.closeModal(); } }, 'Un seul fichier'),
+                E('button', { class: 'btn primary', onclick: one }, 'Un STEP par pièce (ZIP) – recommandé'))));
+            break;
+          }
+          download(txt, n + '.step', 'application/step');
+          if (this.model.objects.some((o) => String(o.params?.thread || '').startsWith('Réel'))) this.toast('STEP : filetages exportés en version simplifiée (standard pour l\'échange CAO)');
+          break;
+        }
         case 'stl': download(EX.toSTL(b), n + '.stl', 'model/stl'); break;
         case 'obj': download(EX.toOBJ(b), n + '.obj', 'text/plain'); break;
         case 'ply': download(EX.toPLY(b), n + '.ply', 'text/plain'); break;

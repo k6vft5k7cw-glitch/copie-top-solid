@@ -248,9 +248,11 @@ export class Model {
   }
 
   /** Liste des corps solides visibles de premier niveau (ou sélection) avec leur géométrie monde */
-  worldBodies(ids = null) {
+  worldBodies(ids = null, { simplifyThreads = false } = {}) {
     const out = [];
-    for (const o of this.objects) {
+    for (const o0 of this.objects) {
+      // filetage réel → simplifié pour les échanges CAO (comme les filetages « cosmétiques » des logiciels de CAO)
+      const o = simplifyThreads && o0.type === 'part' && String(o0.params.thread || '').startsWith('Réel') ? { ...o0, params: { ...o0.params, thread: 'Simplifié' } } : o0;
       if (!this.isSolid(o)) continue;
       if (o.role) continue; // consommé par un booléen
       if (ids ? !ids.includes(o.id) : !this.isVisible(o)) continue;
