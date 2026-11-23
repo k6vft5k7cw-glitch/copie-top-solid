@@ -99,6 +99,7 @@ class App {
     this.ai = new Assistant(this);
     this.setupUI();
     this.bindEvents();
+    this.setupMobile();
     this.commit(false);
     this.refresh();
     this.viewer.setView(new THREE.Vector3(1, -1.3, 0.9));
@@ -182,7 +183,47 @@ class App {
     this.renderRibbon();
   }
 
-  showPane(p) {
+  // ---------------------------------------------------------------- téléphone : panneaux coulissants
+  isMobile() { return window.matchMedia('(max-width: 760px)').matches; }
+
+  setSheet(name) {
+    const b = document.body;
+    const cur = ['tree', 'lib', 'props'].find((n) => b.classList.contains('sheet-' + n));
+    b.classList.remove('sheet-tree', 'sheet-lib', 'sheet-props');
+    const next = name === cur || name === 'none' ? null : name;
+    if (next) b.classList.add('sheet-' + next);
+    if (next === 'tree' || next === 'lib') this.showPane(next, true);
+    document.querySelectorAll('#mobnav button').forEach((x) => x.classList.toggle('on', x.dataset.sheet === (next || 'none')));
+    setTimeout(() => this.viewer.resize(), 50);
+  }
+
+  setupMobile() {
+    document.querySelectorAll('#mobnav button').forEach((btn) => btn.addEventListener('click', () => this.setSheet(btn.dataset.sheet)));
+    for (const id of ['#left', '#right']) {
+      $(id).prepend(E('button', { class: 'sheet-handle', onclick: () => this.setSheet('none') }, '▾ Fermer'));
+    }
+    // champ de saisie des cotes en esquisse (pas de clavier physique)
+    const inp = E('input', { type: 'text', inputmode: 'decimal', placeholder: 'Cote : 50, 80;40, x;y…' });
+    const ok = () => { const v = inp.value.trim(); if (!v || this.mode !== 'sketch') return; this.editor.applyTyped(v); this.editor.drawPreview(); inp.value = ''; };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); ok(); } });
+    $('#viewport').append(E('div', { id: 'skinput' }, inp, E('button', { class: 'btn primary', onclick: ok }, 'OK')));
+    // appui long = clic droit (menu contextuel)
+    const cv = this.viewer.renderer.domElement;
+    let t = null, start = null;
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || this.mode !== 'normal') return;
+      start = { x: e.clientX, y: e.clientY };
+      clearTimeout(t);
+      t = setTimeout(() => { this.longPressed = true; this.contextMenu({ clientX: start.x, clientY: start.y }); }, 550);
+    });
+    const cancel = (e) => { if (start && e && e.type === 'pointermove' && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 10) return; clearTimeout(t); };
+    cv.addEventListener('pointermove', cancel);
+    cv.addEventListener('pointerup', () => clearTimeout(t));
+    cv.addEventListener('pointercancel', () => clearTimeout(t));
+  }
+
+  showPane(p, fromSheet = false) {
+    if (!fromSheet && this.isMobile() && (p === 'lib' || p === 'tree')) { document.body.classList.remove('sheet-tree', 'sheet-props'); document.body.classList.add('sheet-' + p); }
     if (document.activeElement && document.activeElement.closest?.('.pane')) document.activeElement.blur();
     document.querySelectorAll('.paneltabs button').forEach((b) => b.classList.toggle('active', b.dataset.pane === p));
     $('#pane-tree').classList.toggle('hidden', p !== 'tree');
@@ -479,7 +520,8 @@ class App {
   }
 
   onClick(e) {
-    if (this.mode === 'sketch') return this.editor.onClick(e);
+    if (this.longPressed) { this.longPressed = false; return; }
+    if (this.mode === 'sketch') { this.editor.onMove(e); return this.editor.onClick(e); }
     if (this.mode === 'place') return this.placeClick(e);
     if (this.mode === 'measure') return this.measureClick(e);
     if (this.mode === 'align') return this.alignClick(e);
@@ -558,7 +600,10 @@ class App {
     this.renderRibbon();
     this.updateWelcome();
     $('#docname').textContent = this.docName;
-    if (this.mode === 'normal') this.setHint(this.selection.length ? 'Glissez les flèches pour déplacer • Double-clic sur une esquisse pour la modifier • Suppr pour effacer' : 'Clic gauche : sélectionner • Glisser : tourner • Clic droit / molette : déplacer • Molette : zoom');
+    if (this.mode === 'normal') {
+      if (this.isMobile()) this.setHint(this.selection.length ? 'Touchez les cotes pour les modifier • ⚙️ Propriétés pour tout régler • Appui long : menu' : 'Toucher : sélectionner • 1 doigt : tourner • 2 doigts : zoomer / déplacer • Appui long : menu');
+      else this.setHint(this.selection.length ? 'Glissez les flèches pour déplacer • Double-clic sur une esquisse pour la modifier • Suppr pour effacer' : 'Clic gauche : sélectionner • Glisser : tourner • Clic droit / molette : déplacer • Molette : zoom');
+    }
     if (fk) { const n = document.querySelector(`[data-k="${fk}"]`); if (n) { n.focus(); n.select?.(); } }
   }
 
@@ -1191,6 +1236,7 @@ class App {
   }
 
   startPlace(spec, opts = {}) {
+    if (this.isMobile()) this.setSheet('none');
     if (this.mode === 'sketch') this.exitSketch();
     if (this.mode !== 'normal') this.cancelMode();
     let geom;
@@ -1434,6 +1480,7 @@ class App {
     banner.innerHTML = '';
     banner.append(E('span', {}, '✏️ Mode esquisse : ' + this.model.displayName(o)), E('button', { onclick: () => this.exitSketch() }, 'Terminer ✓'));
     banner.classList.remove('hidden');
+    document.body.classList.add('sketching');
     this.editor.setTool(o.params.entities.length ? 'select' : 'line');
     this.refresh();
     this.renderSketchDims();
@@ -1448,6 +1495,7 @@ class App {
     this.viewer.setNavMode('normal');
     this.viewer.setOrtho(this.prevOrtho);
     $('#sketchbanner').classList.add('hidden');
+    document.body.classList.remove('sketching');
     $('#cursorLabel').classList.add('hidden');
     $('#skdims')?.remove();
     const empty = !o.params.entities.length;
@@ -2068,8 +2116,16 @@ class App {
     }
     document.body.append(m);
     const r = m.getBoundingClientRect();
-    m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
-    m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+    if (this.isMobile()) {
+      // au doigt : menu centré en bas, insensible un instant (le doigt qui se lève ne doit rien déclencher)
+      m.style.left = Math.max(8, (innerWidth - r.width) / 2) + 'px';
+      m.style.top = Math.max(8, innerHeight - r.height - 90) + 'px';
+      m.style.pointerEvents = 'none';
+      setTimeout(() => { m.style.pointerEvents = ''; }, 450);
+    } else {
+      m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+      m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+    }
     this.menu = m;
     setTimeout(() => window.addEventListener('pointerdown', this._closer = (ev) => { if (!m.contains(ev.target)) this.closeMenu(); }), 0);
   }
