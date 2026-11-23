@@ -198,12 +198,7 @@ main { flex: 1; display: flex; min-height: 0; }
   #left { width: 220px; }
   #right { width: 240px; }
 }
-@media (max-width: 760px) {
-  main { flex-direction: column; }
-  #left, #right { width: 100%; height: 30vh; border: 0; border-top: 1px solid var(--line); }
-  #viewport { min-height: 40vh; }
-  #welcome .grid { grid-template-columns: repeat(2, 1fr); }
-}
+#mobnav, #skinput, .sheet-handle { display: none; }
 @media print {
   body * { visibility: hidden; }
 }
@@ -291,3 +286,73 @@ main { flex: 1; display: flex; min-height: 0; }
 .nest-list input[type=text] { width: 48px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; }
 .ai-alt { margin-bottom: 8px; }
 .ai-alt a { color: var(--accent); font-weight: 700; }
+
+/* ================================================ TÉLÉPHONE */
+@media (max-width: 760px) {
+  #app { height: 100dvh; }
+  #topbar { height: auto; flex-wrap: wrap; padding: 6px 8px 0; gap: 4px 6px; }
+  .brand { font-size: 15px; gap: 6px; }
+  .logo { width: 18px; height: 18px; }
+  #quick { border: 0; padding: 0; gap: 0; }
+  #quick button { padding: 5px; }
+  #docname { display: none; }
+  #topbar .spacer { display: none; }
+  #ai-btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
+  #tabs { order: 10; width: 100%; height: 36px; overflow-x: auto; scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  #tabs button { flex: none; padding: 0 10px; white-space: nowrap; font-size: 13px; }
+  #ribbon { min-height: 0; padding: 4px; scrollbar-width: none; }
+  #ribbon::-webkit-scrollbar { display: none; }
+  .rgroup { padding: 0 3px; }
+  .rgroup .gname { display: none; }
+  .rbtn { min-width: 54px; max-width: 72px; padding: 3px; font-size: 10.5px; gap: 2px; }
+  .rbtn .ico { width: 20px; height: 20px; }
+  main { flex-direction: column; position: relative; }
+  #viewport { flex: 1; min-height: 0; }
+  #left, #right { display: none; position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 58%; z-index: 30; border: 1px solid var(--line); border-radius: 16px 16px 0 0; box-shadow: 0 -10px 30px #0003; }
+  body.sheet-tree #left, body.sheet-lib #left { display: flex; }
+  body.sheet-props #right { display: block; }
+  .paneltabs { display: none; }
+  .sheet-handle { display: block; width: 100%; border: 0; background: var(--panel2); color: var(--muted); padding: 8px; font-weight: 700; border-radius: 16px 16px 0 0; position: sticky; top: 0; z-index: 2; }
+  #mobnav { display: flex; background: var(--panel); border-top: 1px solid var(--line); }
+  #mobnav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; border: 0; background: none; padding: 5px 0 6px; font-size: 18px; color: var(--muted); }
+  #mobnav button span { font-size: 11px; font-weight: 600; }
+  #mobnav button.on { color: var(--accent); background: var(--accent2); }
+  #status { height: auto; min-height: 24px; padding: 3px 8px; font-size: 11px; }
+  #status .tog, #coords { display: none; }
+  #hint { white-space: normal; line-height: 1.25; font-weight: 500; }
+  #viewbar { top: 6px; right: 6px; padding: 2px; gap: 0; }
+  #viewbar button { padding: 5px; }
+  #viewbar hr, #vb-wire, #vb-grid { display: none; }
+  #welcome { align-items: flex-start; overflow-y: auto; padding: 8px; }
+  #welcome .card { padding: 14px; border-radius: 12px; }
+  #welcome h1 { font-size: 18px; }
+  #welcome p { margin-bottom: 10px; font-size: 13px; }
+  #welcome .grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  #welcome .grid button { padding: 10px 6px; font-size: 13px; gap: 4px; }
+  #welcome .grid button .ico { width: 24px; height: 24px; }
+  #modal .box { min-width: 0; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 12px; }
+  .drawing-wrap, .cam-wrap { flex-direction: column; }
+  .drawing-preview, .cam-prev { width: 100%; height: 38vh; flex: none; }
+  .drawing-opts, .cam-opts { width: 100% !important; max-height: none; }
+  .choice { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .exp-grid { grid-template-columns: 1fr; }
+  .field input[type=number], .field input[type=text], .field select { width: 46%; }
+  #ai-panel { left: 6px; right: 6px; width: auto; top: 6px; bottom: 6px; }
+  #hud { max-width: 94vw; padding: 4px 6px; }
+  #hud .hud-t { font-size: 11px; margin-bottom: 2px; }
+  #hud .hud-row { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+  #hud label { flex-direction: row; align-items: center; gap: 4px; font-size: 10px; }
+  #hud label span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hud input, #hud select { width: 56px; padding: 3px 4px; font-size: 13px; }
+  #hud .hud-dim { display: none; }
+  #coach { left: 6px; right: 6px; width: auto; bottom: 6px; }
+  #sketchbanner { top: 6px; padding: 4px 10px; font-size: 12px; max-width: 72%; }
+  body.sketching #skinput { display: flex; position: absolute; left: 8px; right: 60px; bottom: 8px; gap: 6px; z-index: 6; }
+  #skinput input { flex: 1; padding: 9px 10px; border: 2px solid var(--accent); border-radius: 10px; font-size: 16px; background: var(--panel); }
+  .ctxmenu { min-width: 240px; }
+  .ctxmenu button { padding: 11px 12px; }
+  #palette { padding-top: 4vh; }
+  #explodebar { left: 8px; right: 8px; transform: none; }
+  #explodebar input { width: 100%; }
+}
