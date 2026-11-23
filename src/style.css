@@ -289,3 +289,5 @@ main { flex: 1; display: flex; min-height: 0; }
 .nest-list { max-height: 26vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; margin-bottom: 8px; }
 .nest-list label { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 .nest-list input[type=text] { width: 48px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; }
+.ai-alt { margin-bottom: 8px; }
+.ai-alt a { color: var(--accent); font-weight: 700; }

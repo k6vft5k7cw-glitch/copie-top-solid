@@ -191,6 +191,7 @@ export class Assistant {
   keyBox() {
     const inp = E('input', { type: 'password', placeholder: 'sk-ant-…', value: getKey(), autocomplete: 'off' });
     const box = E('div', { class: 'ai-msg ai ai-key' },
+      E('div', { class: 'ai-alt', html: '✨ <b>Vous avez un compte Claude ?</b> Ouvrez <a href="https://claude.ai/artifact/GWjzaLcUfd61bTcEXTVEF1" target="_blank" rel="noopener">FormaCAD sur claude.ai</a> : l\'assistant y fonctionne directement avec votre compte, sans clé.<br><br>Sinon :' }),
       E('div', { html: '<b>🔑 Clé API Anthropic</b><br>Dans la version téléchargée, l\'assistant utilise votre propre clé API (facturée à l\'usage par Anthropic, environ quelques centimes par demande).<br>1. Créez un compte sur <b>console.anthropic.com</b>, ajoutez un moyen de paiement<br>2. Menu <b>API Keys → Create Key</b>, copiez la clé<br>3. Collez-la ici. Elle reste uniquement sur cet ordinateur.' }),
       E('div', { class: 'ai-keyrow' }, inp,
         E('button', { class: 'btn primary', onclick: () => { const k = inp.value.trim(); if (!/^sk-ant-/.test(k)) { this.app.toast('Clé invalide : elle commence par « sk-ant- »', true); return; } setKey(k); box.remove(); this.addMsg('ai', '✅ Clé enregistrée. Je suis prêt : décrivez ce que vous voulez concevoir.'); } }, 'Enregistrer')),

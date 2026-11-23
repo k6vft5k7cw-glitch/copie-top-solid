@@ -20,6 +20,8 @@ h1 { font-size: 40px; margin: 0; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 14px 22px; border-radius: 12px; font-weight: 700; text-decoration: none; border: 2px solid var(--accent); }
 .btn.primary { background: var(--accent); color: #fff; }
 .btn.secondary { color: var(--accent); background: transparent; }
+.btn.ai { color: #fff; border-color: transparent; background: linear-gradient(135deg, #1565c0, #7b1fa2); }
+.hint { margin: -24px 0 36px; color: var(--muted); font-size: 15px; max-width: 760px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
 .card h3 { margin: 0 0 6px; font-size: 17px; }
@@ -38,7 +40,9 @@ footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
   <div class="cta">
     <a class="btn primary" href="app.html">▶ Utiliser en ligne</a>
     <a class="btn secondary" href="FormaCAD.zip" download>⬇ Télécharger pour Windows, Mac, Linux (.zip)</a>
+    <a class="btn ai" href="https://claude.ai/artifact/GWjzaLcUfd61bTcEXTVEF1" target="_blank" rel="noopener">✨ Avec l'assistant IA (compte Claude)</a>
   </div>
+  <p class="hint">✨ <b>Assistant IA sans clé :</b> si vous avez un compte Claude (même gratuit), ouvrez la version « Avec l'assistant IA ». L'assistant y fonctionne directement avec votre compte. Dans les autres versions, il demande une clé API Anthropic.</p>
 
   <div class="grid">
     <div class="card"><h3>✏️ Esquisse et volumes</h3><p>Esquisse 2D avec cotes au clavier, congés, contraintes ; extrusion, poche, révolution, perçages lamés et fraisés.</p></div>
@@ -48,7 +52,7 @@ footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
     <div class="card"><h3>📤 Tous les formats</h3><p>DXF, STEP, STL, OBJ, GLB, PLY, SVG, PDF, CSV ; import STEP, IGES, STL, OBJ, glTF, DXF.</p></div>
     <div class="card"><h3>⚙️ Atelier CN</h3><p>G-code laser, plasma, oxycoupage et fraisage, imbrication des pièces sur tôle avec taux de chute.</p></div>
     <div class="card"><h3>🏗 Calculs métiers</h3><p>Poutres (RDM), boulons et soudures, conditions de coupe, courroies, chaînes, roulements, ressorts, vérins.</p></div>
-    <div class="card"><h3>✨ Assistant IA</h3><p>Décrivez votre pièce en français, l'assistant la construit (clé API Anthropic requise pour la version téléchargée).</p></div>
+    <div class="card"><h3>✨ Assistant IA</h3><p>Décrivez votre pièce en français, l'assistant la construit. Sans clé avec un compte Claude, ou avec une clé API Anthropic.</p></div>
   </div>
 
   <h2>Installer la version téléchargée</h2>

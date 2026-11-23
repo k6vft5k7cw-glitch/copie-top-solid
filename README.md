@@ -14,6 +14,8 @@ normalisés, mise en plan, et export **DXF, STEP, STL, OBJ, GLB, PLY, SVG, PNG**
 2. Double-cliquez sur **`FormaCAD.html`** : il s'ouvre dans votre navigateur (Chrome, Edge ou Firefox).
 3. Rien à installer. **Tout fonctionne hors ligne**, y compris l'import STEP. Seul l'assistant IA a besoin d'internet et d'une clé API Anthropic.
 
+**Avec l'assistant IA, sans clé** (compte Claude, même gratuit) : https://claude.ai/artifact/GWjzaLcUfd61bTcEXTVEF1
+
 **Version en ligne**, sans téléchargement : https://k6vft5k7cw-glitch.github.io/copie-top-solid/ (une fois GitHub Pages activé, voir plus bas).
 
 > Vos projets s'enregistrent en fichiers `.fcad` (Ctrl+S). Une sauvegarde automatique est aussi faite dans le navigateur.
