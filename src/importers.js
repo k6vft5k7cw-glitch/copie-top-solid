@@ -5,16 +5,13 @@ let occtPromise = null;
 async function getOcct() {
   if (!occtPromise) {
     occtPromise = (async () => {
-      const [{ default: occtimportjs }, { default: wasmUrl }] = await Promise.all([
+      const [{ default: occtimportjs }, { default: b64 }] = await Promise.all([
         import('occt-import-js'),
-        import('occt-import-js/dist/occt-import-js.wasm?url'),
+        import('virtual:occt-wasm'),
       ]);
-      let buf;
-      if (wasmUrl.startsWith('data:')) {
-        const bin = atob(wasmUrl.slice(wasmUrl.indexOf(',') + 1));
-        buf = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      } else buf = await (await fetch(wasmUrl)).arrayBuffer();
+      const bin = atob(b64);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
       return occtimportjs({ wasmBinary: buf });
     })();
   }
